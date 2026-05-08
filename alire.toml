@@ -1,0 +1,28 @@
+name = "itb"
+description = "Ada binding to libitb, the ITB cryptographic library."
+version = "0.1.0-dev"
+authors = ["everanium"]
+maintainers = ["a@encloud.asia"]
+maintainers-logins = ["everanium"]
+licenses = "MIT"
+tags = ["cryptography", "ffi", "binding"]
+
+# The wrapper sources have no Alire-managed dependencies. The only
+# runtime dependency is the libitb shared library distributed under
+# <repo>/dist/<os>-<arch>/libitb.<ext>, located through compile-time
+# linker search paths and runtime rpath. The wrapper itself is pure
+# Ada 2022 + standard library.
+project-files = ["itb.gpr"]
+
+[[depends-on]]
+gnat = ">=13"
+
+[build-switches]
+"*".compile_checks = "warnings"
+"*".runtime_checks = "default"
+"*".style_checks = "no"
+"release".optimization = "performance"
+"validation".optimization = "performance"
+
+[[depends-on]]
+gnatprove = "^15.1.0"

@@ -1,0 +1,42 @@
+--  itb_bench.gpr — Bench executables for the Itb binding.
+--
+--  bench/bench_single.adb and bench/bench_triple.adb are the two
+--  main entry points; bench/common.adb / common.ads provide the
+--  Go-bench-style runner shared between them. Outputs Go-bench-style
+--  one-line-per-case summaries that the orchestrator parses to fill
+--  bench/BENCH.md.
+--
+--  Run with:
+--
+--      gprbuild -P itb_bench.gpr
+--      ITB_BENCH_MIN_SEC=5 ./obj-bench/bench_single
+--      ITB_BENCH_MIN_SEC=5 ITB_LOCKSEED=1 ./obj-bench/bench_single
+--      ITB_BENCH_MIN_SEC=5 ./obj-bench/bench_triple
+--      ITB_BENCH_MIN_SEC=5 ITB_LOCKSEED=1 ./obj-bench/bench_triple
+
+with "itb";
+
+project Itb_Bench is
+
+   for Source_Dirs use ("bench");
+   for Object_Dir use "obj-bench";
+   for Exec_Dir use "obj-bench";
+   for Main use ("bench_single.adb", "bench_triple.adb",
+                 "bench_stream.adb");
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022",
+         "-gnatwa",
+         "-gnatwe",
+         "-O3",            --  Bench builds use -O3 for hot-path measurement.
+         "-g");
+   end Compiler;
+
+   package Linker renames Itb.Linker;
+
+   package Builder is
+      for Default_Switches ("Ada") use ("-j0");
+   end Builder;
+
+end Itb_Bench;

@@ -1,0 +1,61 @@
+--  itb_tests.gpr — Test executables for the Itb binding.
+--
+--  Each tests/test_*.adb file is a standalone main procedure that
+--  exits 0 on pass / non-zero on fail (the run_tests.sh harness
+--  iterates the resulting binaries and reports pass / fail counts).
+--  Tests follow the bindings/rust/tests/ file-for-file mirror.
+--
+--  Run with:
+--
+--      gprbuild -P itb_tests.gpr
+--      ./run_tests.sh
+
+with "itb";
+
+project Itb_Tests is
+
+   for Source_Dirs use ("tests");
+   for Object_Dir use "obj-tests";
+   for Exec_Dir use "obj-tests";
+   for Main use ("test_aescmac.adb",
+                 "test_areion.adb",
+                 "test_blake2b.adb",
+                 "test_blake2s.adb",
+                 "test_blake3.adb",
+                 "test_chacha20.adb",
+                 "test_siphash24.adb",
+                 "test_blob.adb",
+                 "test_roundtrip.adb",
+                 "test_streams.adb",
+                 "test_streams_nonce.adb",
+                 "test_attach_lock_seed.adb",
+                 "test_auth.adb",
+                 "test_nonce_sizes.adb",
+                 "test_persistence.adb",
+                 "test_config.adb",
+                 "test_easy.adb",
+                 "test_easy_aescmac.adb",
+                 "test_easy_areion.adb",
+                 "test_easy_blake2b.adb",
+                 "test_easy_blake2s.adb",
+                 "test_easy_blake3.adb",
+                 "test_easy_chacha20.adb",
+                 "test_easy_siphash24.adb",
+                 "test_easy_auth.adb",
+                 "test_easy_mixed.adb",
+                 "test_easy_nonce_sizes.adb",
+                 "test_easy_persistence.adb",
+                 "test_easy_roundtrip.adb",
+                 "test_easy_streams.adb",
+                 "test_streams_auth.adb",
+                 "test_easy_streams_auth.adb");
+
+   package Compiler renames Itb.Compiler;
+
+   package Linker renames Itb.Linker;
+
+   package Builder is
+      for Default_Switches ("Ada") use ("-j0");
+   end Builder;
+
+end Itb_Tests;

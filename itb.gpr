@@ -1,0 +1,70 @@
+--  itb.gpr — Ada binding library project for libitb.
+--
+--  Builds the Ada wrapper sources under src/ and exposes the linker
+--  switches needed for any consumer (test binaries, bench binaries,
+--  user programs) to link against libitb.so / libitb.dylib /
+--  libitb.dll. Consumers `with "itb";` and inherit the linker
+--  options automatically.
+--
+--  Library search resolution at link time:
+--    - Compile-time: -L${ITB_DIST_DIR} (default ../../dist/linux-amd64
+--      relative to this .gpr).
+--    - Runtime: -Wl,-rpath,$ORIGIN/../../../dist/linux-amd64 — the
+--      binary searches the canonical dist/ subfolder relative to its
+--      own location at runtime, so no LD_LIBRARY_PATH setup is needed
+--      for the canonical bindings/ada/obj-tests/ / obj-bench/ layouts.
+--      User programs that install the binary outside this layout must
+--      either install libitb.so to a system loader path (/usr/local/lib,
+--      ldconfig'd) or set LD_LIBRARY_PATH before invocation.
+
+project Itb is
+
+   --  Source layout: every Itb.* package lives under src/.
+   for Source_Dirs use ("src");
+   for Object_Dir use "obj";
+   for Languages use ("Ada");
+
+   --  Path to the libitb shared-library distribution. Defaults to the
+   --  monorepo's dist/<os>-<arch>/ tree relative to this .gpr file.
+   --  Override with `gprbuild -XITB_DIST_DIR=/abs/path` for installs
+   --  where libitb.so lives elsewhere.
+   Dist_Dir := external ("ITB_DIST_DIR", "../../dist/linux-amd64");
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022",      --  Ada 2022 mode (Static_Predicate, etc.).
+         "-gnatwa",        --  All warnings on (audit-grade build).
+         "-gnatwe",        --  Warnings as errors.
+         "-O2",            --  Optimisation level for FFI hot path.
+         "-g");            --  Debug info for crash diagnosis.
+   end Compiler;
+
+   --  Linker_Options propagate to every consumer that withs this
+   --  project. The -L flag covers compile-time symbol resolution; the
+   --  -Wl,-rpath flag bakes a runtime search path into the resulting
+   --  binary so no env-var setup is needed for the canonical layout.
+   --
+   --  Note on linker noise. Builds emit a per-executable notice
+   --  "ld: error in /lib/../lib64/Scrt1.o(.sframe); no .sframe will
+   --  be created" on Arch Linux when the Alire-bundled binutils 2.40+
+   --  meets a system glibc Scrt1.o whose .sframe section is in an
+   --  older format. The notice is non-fatal — the linker continues
+   --  and the binary is produced correctly; the .sframe section is
+   --  purely advisory (used by perf-tooling for fast async-signal-
+   --  safe stack unwinding) and its absence has no effect on
+   --  correctness or runtime performance. The notice is emitted
+   --  during input parsing (before any -z option can take effect),
+   --  so binutils flags cannot suppress it; run_tests.sh filters it
+   --  out of human-facing output via grep.
+   package Linker is
+      for Linker_Options use
+        ("-L" & Dist_Dir,
+         "-litb",
+         "-Wl,-rpath,$ORIGIN/../../../dist/linux-amd64");
+   end Linker;
+
+   package Builder is
+      for Default_Switches ("Ada") use ("-j0");  --  Use all cores.
+   end Builder;
+
+end Itb;
