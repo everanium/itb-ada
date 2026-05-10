@@ -424,44 +424,58 @@ procedure Bench_Wrapper is
    --  Wrapper Only payloads.
    Wrap_Plain : Byte_Buf_Access := Random_Bytes (Wrapper_Only_Bytes);
 
-   --  Single Message ITB ciphertexts (computed once per case via the
-   --  Pre_Compute step) — one for each of the four single-message
-   --  modes × Single / Triple.
+   --  Single Message plaintext (re-used across every Single Message
+   --  encrypt / decrypt case so the per-iter cost reflects encrypt +
+   --  wrap on a stable plaintext).
    Single_Plain         : Byte_Buf_Access :=
      Random_Bytes (Single_Message_Bytes);
-   Single_Easy_Nomac    : Byte_Buf_Access := null;
-   Single_Easy_Auth     : Byte_Buf_Access := null;
-   Single_Low_Nomac     : Byte_Buf_Access := null;
-   Single_Low_Auth      : Byte_Buf_Access := null;
-   Triple_Easy_Nomac    : Byte_Buf_Access := null;
-   Triple_Easy_Auth     : Byte_Buf_Access := null;
-   Triple_Low_Nomac     : Byte_Buf_Access := null;
-   Triple_Low_Auth      : Byte_Buf_Access := null;
 
-   --  Streaming payload + AEAD transcripts. Triple variants reuse the
-   --  same Stream_Primitive so the encryptors have matching widths.
+   --  Pristine wires for decrypt-direction Single Message cases.
+   --  Each wire is computed once at setup as
+   --     Wrap_In_Place (cipher_key, ITB_encrypt(plain))
+   --  then prefixed with the wrap nonce. The timed decrypt loop
+   --  refreshes a working copy from the pristine buffer per iter
+   --  (mirrors the wrapper/bench_test.go pristineWire pattern).
+   --  Outer key index = Outer_Cipher.
+   type Wire_Slot is record
+      Wire : Byte_Buf_Access := null;
+   end record;
+   --  [cipher × mode] (mode encoded in the labelled-array selectors
+   --  declared below in Run_Single_Message_Cases).
+   Single_Easy_Nomac_Wires : array (Outer_Cipher) of Wire_Slot;
+   Single_Easy_Auth_Wires  : array (Outer_Cipher) of Wire_Slot;
+   Single_Low_Nomac_Wires  : array (Outer_Cipher) of Wire_Slot;
+   Single_Low_Auth_Wires   : array (Outer_Cipher) of Wire_Slot;
+   Triple_Easy_Nomac_Wires : array (Outer_Cipher) of Wire_Slot;
+   Triple_Easy_Auth_Wires  : array (Outer_Cipher) of Wire_Slot;
+   Triple_Low_Nomac_Wires  : array (Outer_Cipher) of Wire_Slot;
+   Triple_Low_Auth_Wires   : array (Outer_Cipher) of Wire_Slot;
+
+   --  Streaming payload (64 MiB) reused across every streaming case.
    Stream_Plain : Byte_Buf_Access := Random_Bytes (Stream_Payload_Bytes);
 
-   --  AEAD transcripts pre-encrypted at startup.
-   Tx_Easy_AEAD_Single  : aliased Memory_Stream;
-   Tx_Easy_AEAD_Triple  : aliased Memory_Stream;
-   Tx_Low_AEAD_Single   : aliased Memory_Stream;
-   Tx_Low_AEAD_Triple   : aliased Memory_Stream;
+   --  Pristine wires for decrypt-direction Streaming cases. Each
+   --  wire is built once at setup as
+   --     wrap_stream_writer(stream-encrypt(plain))
+   --  with one CSPRNG nonce drawn at setup; the decrypt loop
+   --  refreshes a working copy per iter and runs
+   --  unwrap-stream-reader → stream-decrypt to recover the
+   --  plaintext.
+   Stream_Easy_AEAD_Single_Wires : array (Outer_Cipher) of Wire_Slot;
+   Stream_Easy_AEAD_Triple_Wires : array (Outer_Cipher) of Wire_Slot;
+   Stream_Low_AEAD_Single_Wires  : array (Outer_Cipher) of Wire_Slot;
+   Stream_Low_AEAD_Triple_Wires  : array (Outer_Cipher) of Wire_Slot;
+   Stream_Easy_UL_Single_Wires   : array (Outer_Cipher) of Wire_Slot;
+   Stream_Easy_UL_Triple_Wires   : array (Outer_Cipher) of Wire_Slot;
+   Stream_Low_UL_Single_Wires    : array (Outer_Cipher) of Wire_Slot;
+   Stream_Low_UL_Triple_Wires    : array (Outer_Cipher) of Wire_Slot;
 
-   --  No-MAC user-loop transcripts. Each transcript is the
-   --  concatenation of u32_LE_len || ITB_chunk_ct, repeated over the
-   --  payload sliced into Stream_Chunk_Size pieces. We materialise
-   --  the inner transcript (without wrap) so the bench can also
-   --  measure the wrap layer's user-loop encrypt cost on top of
-   --  pre-built plain ciphertexts.
-   Tx_Easy_UL_Single    : Byte_Buf_Access := null;
-   Tx_Easy_UL_Triple    : Byte_Buf_Access := null;
-   Tx_Low_UL_Single     : Byte_Buf_Access := null;
-   Tx_Low_UL_Triple     : Byte_Buf_Access := null;
-
-   --  Wire-shape buffers used by per-case decrypt iters. Each buffer
-   --  is reset to its pristine wrap-encrypted shape via copy from
-   --  the corresponding _Tx buffer at the start of every iter.
+   --  Reusable Memory_Stream scratch slots for the encrypt-direction
+   --  pipeline (inner ITB transcript) and decrypt-direction pipeline
+   --  (recovered plaintext sink). Allocated lazily on first use,
+   --  Reset (Used := 0) per iter.
+   Inner_Stream  : aliased Memory_Stream;
+   Plain_Sink    : aliased Memory_Stream;
    Source_Stream : aliased Memory_Stream;
    Sink_Stream   : aliased Memory_Stream;
 
@@ -654,83 +668,222 @@ procedure Bench_Wrapper is
       end;
    end Build_UL_Low_Triple;
 
+   --  Wraps a plain ITB ciphertext blob into a fresh wrapper wire
+   --  (nonce || in-place-XOR(blob)) under the supplied cipher / key.
+   --  Returns a freshly-allocated Byte_Buf_Access owning the wire.
+   --  Used by the decrypt-direction pre-compute path.
+   function Build_Pristine_Wrap
+     (C    : Outer_Cipher;
+      Key  : Byte_Array;
+      Blob : Byte_Array) return Byte_Buf_Access
+   is
+      N_Len : constant Stream_Element_Offset :=
+        Stream_Element_Offset (Itb.Wrapper.Nonce_Size (C));
+      Wire_Total : constant Stream_Element_Offset :=
+        N_Len + Blob'Length;
+      Out_Nonce : Byte_Array (1 .. N_Len);
+      Wire : constant Byte_Buf_Access :=
+        new Byte_Array (1 .. Wire_Total);
+   begin
+      Wire (N_Len + 1 .. Wire_Total) := Blob;
+      Itb.Wrapper.Wrap_In_Place
+        (C, Key, Wire (N_Len + 1 .. Wire_Total), Out_Nonce);
+      Wire (1 .. N_Len) := Out_Nonce;
+      return Wire;
+   end Build_Pristine_Wrap;
+
+   --  Wraps an arbitrary inner streaming transcript bytes (already
+   --  produced via stream-encrypt) into a fresh wrapper wire by
+   --  driving one Wrap_Stream_Writer over the entire transcript.
+   --  Mirrors Build_Pristine_Wrap but for streaming-shaped wires.
+   function Build_Pristine_Wrap_Stream
+     (C       : Outer_Cipher;
+      Key     : Byte_Array;
+      Inner   : Byte_Array) return Byte_Buf_Access
+   is
+      N_Len : constant Stream_Element_Offset :=
+        Stream_Element_Offset (Itb.Wrapper.Nonce_Size (C));
+      Wire_Total : constant Stream_Element_Offset :=
+        N_Len + Inner'Length;
+      Out_Nonce : Byte_Array (1 .. N_Len);
+      Wire : constant Byte_Buf_Access :=
+        new Byte_Array (1 .. Wire_Total);
+      W : Itb.Wrapper.Wrap_Stream_Writer;
+      Last : Stream_Element_Offset;
+   begin
+      Itb.Wrapper.Initialize (W, C, Key, Out_Nonce);
+      Itb.Wrapper.Update
+        (W, Inner, Wire (N_Len + 1 .. Wire_Total), Last);
+      Itb.Wrapper.Close (W);
+      Wire (1 .. N_Len) := Out_Nonce;
+      return Wire;
+   end Build_Pristine_Wrap_Stream;
+
+   --  Pre-compute pristine wires for every decrypt-direction case.
+   --  Each wire holds wrap_in_place(ITB_encrypt(plain)) (Single
+   --  Message) or wrap_stream_writer(stream-encrypt(plain))
+   --  (Streaming). The timed decrypt loop refreshes a working copy
+   --  from the pristine buffer per iter; encrypt-direction cases do
+   --  NOT use these pre-computed buffers — their timed loop runs the
+   --  full encrypt + wrap pipeline end-to-end on each iter.
    procedure Pre_Compute is
    begin
-      --  Single Message — Single Ouroboros.
-      Single_Easy_Nomac :=
-        new Byte_Array'(Itb.Encryptor.Encrypt
-                          (Enc_Easy_Single, Single_Plain.all));
-      Single_Easy_Auth :=
-        new Byte_Array'(Itb.Encryptor.Encrypt_Auth
-                          (Enc_Easy_Single, Single_Plain.all));
-      Single_Low_Nomac :=
-        new Byte_Array'(Itb.Cipher.Encrypt
-                          (Seed_Noise, Seed_Data1, Seed_Start1,
-                           Single_Plain.all));
-      Single_Low_Auth :=
-        new Byte_Array'(Itb.Cipher.Encrypt_Auth
-                          (Seed_Noise, Seed_Data1, Seed_Start1,
-                           Mac_Handle, Single_Plain.all));
+      for C in Outer_Cipher loop
+         declare
+            Key : constant Byte_Array := Cipher_Keys (C).Key.all;
+         begin
+            --  Single Message — Single Ouroboros wires.
+            declare
+               CT : constant Byte_Array :=
+                 Itb.Encryptor.Encrypt (Enc_Easy_Single, Single_Plain.all);
+            begin
+               Single_Easy_Nomac_Wires (C).Wire :=
+                 Build_Pristine_Wrap (C, Key, CT);
+            end;
+            declare
+               CT : constant Byte_Array :=
+                 Itb.Encryptor.Encrypt_Auth
+                   (Enc_Easy_Single, Single_Plain.all);
+            begin
+               Single_Easy_Auth_Wires (C).Wire :=
+                 Build_Pristine_Wrap (C, Key, CT);
+            end;
+            declare
+               CT : constant Byte_Array :=
+                 Itb.Cipher.Encrypt
+                   (Seed_Noise, Seed_Data1, Seed_Start1,
+                    Single_Plain.all);
+            begin
+               Single_Low_Nomac_Wires (C).Wire :=
+                 Build_Pristine_Wrap (C, Key, CT);
+            end;
+            declare
+               CT : constant Byte_Array :=
+                 Itb.Cipher.Encrypt_Auth
+                   (Seed_Noise, Seed_Data1, Seed_Start1,
+                    Mac_Handle, Single_Plain.all);
+            begin
+               Single_Low_Auth_Wires (C).Wire :=
+                 Build_Pristine_Wrap (C, Key, CT);
+            end;
 
-      --  Single Message — Triple Ouroboros.
-      Triple_Easy_Nomac :=
-        new Byte_Array'(Itb.Encryptor.Encrypt
-                          (Enc_Easy_Triple, Single_Plain.all));
-      Triple_Easy_Auth :=
-        new Byte_Array'(Itb.Encryptor.Encrypt_Auth
-                          (Enc_Easy_Triple, Single_Plain.all));
-      Triple_Low_Nomac :=
-        new Byte_Array'(Itb.Cipher.Encrypt_Triple
-                          (Seed_Noise,
-                           Seed_Data1, Seed_Data2, Seed_Data3,
-                           Seed_Start1, Seed_Start2, Seed_Start3,
-                           Single_Plain.all));
-      Triple_Low_Auth :=
-        new Byte_Array'(Itb.Cipher.Encrypt_Auth_Triple
-                          (Seed_Noise,
-                           Seed_Data1, Seed_Data2, Seed_Data3,
-                           Seed_Start1, Seed_Start2, Seed_Start3,
-                           Mac_Handle, Single_Plain.all));
+            --  Single Message — Triple Ouroboros wires.
+            declare
+               CT : constant Byte_Array :=
+                 Itb.Encryptor.Encrypt (Enc_Easy_Triple, Single_Plain.all);
+            begin
+               Triple_Easy_Nomac_Wires (C).Wire :=
+                 Build_Pristine_Wrap (C, Key, CT);
+            end;
+            declare
+               CT : constant Byte_Array :=
+                 Itb.Encryptor.Encrypt_Auth
+                   (Enc_Easy_Triple, Single_Plain.all);
+            begin
+               Triple_Easy_Auth_Wires (C).Wire :=
+                 Build_Pristine_Wrap (C, Key, CT);
+            end;
+            declare
+               CT : constant Byte_Array :=
+                 Itb.Cipher.Encrypt_Triple
+                   (Seed_Noise,
+                    Seed_Data1, Seed_Data2, Seed_Data3,
+                    Seed_Start1, Seed_Start2, Seed_Start3,
+                    Single_Plain.all);
+            begin
+               Triple_Low_Nomac_Wires (C).Wire :=
+                 Build_Pristine_Wrap (C, Key, CT);
+            end;
+            declare
+               CT : constant Byte_Array :=
+                 Itb.Cipher.Encrypt_Auth_Triple
+                   (Seed_Noise,
+                    Seed_Data1, Seed_Data2, Seed_Data3,
+                    Seed_Start1, Seed_Start2, Seed_Start3,
+                    Mac_Handle, Single_Plain.all);
+            begin
+               Triple_Low_Auth_Wires (C).Wire :=
+                 Build_Pristine_Wrap (C, Key, CT);
+            end;
 
-      --  Streaming AEAD transcripts.
-      declare
-         Src : aliased Memory_Stream;
-      begin
-         Src.Write (Stream_Plain.all);
+            --  Streaming AEAD wires (Easy + Low-Level, Single + Triple).
+            declare
+               Src : aliased Memory_Stream;
+               Sink : aliased Memory_Stream;
+            begin
+               Src.Write (Stream_Plain.all);
 
-         Reset_Read (Src);
-         Itb.Encryptor.Encrypt_Stream_Auth
-           (Enc_Easy_Single, Src'Access, Tx_Easy_AEAD_Single'Access,
-            Stream_Chunk_Size);
+               Reset_Read (Src);
+               Itb.Encryptor.Encrypt_Stream_Auth
+                 (Enc_Easy_Single, Src'Access, Sink'Access,
+                  Stream_Chunk_Size);
+               Stream_Easy_AEAD_Single_Wires (C).Wire :=
+                 Build_Pristine_Wrap_Stream
+                   (C, Key, Sink.Buf (1 .. Sink.Used));
+               Sink.Used := 0;
 
-         Reset_Read (Src);
-         Itb.Encryptor.Encrypt_Stream_Auth
-           (Enc_Easy_Triple, Src'Access, Tx_Easy_AEAD_Triple'Access,
-            Stream_Chunk_Size);
+               Reset_Read (Src);
+               Itb.Encryptor.Encrypt_Stream_Auth
+                 (Enc_Easy_Triple, Src'Access, Sink'Access,
+                  Stream_Chunk_Size);
+               Stream_Easy_AEAD_Triple_Wires (C).Wire :=
+                 Build_Pristine_Wrap_Stream
+                   (C, Key, Sink.Buf (1 .. Sink.Used));
+               Sink.Used := 0;
 
-         Reset_Read (Src);
-         Itb.Streams.Encrypt_Stream_Auth
-           (Seed_Noise, Seed_Data1, Seed_Start1, Mac_Handle,
-            Src'Access, Tx_Low_AEAD_Single'Access,
-            Stream_Chunk_Size);
+               Reset_Read (Src);
+               Itb.Streams.Encrypt_Stream_Auth
+                 (Seed_Noise, Seed_Data1, Seed_Start1, Mac_Handle,
+                  Src'Access, Sink'Access, Stream_Chunk_Size);
+               Stream_Low_AEAD_Single_Wires (C).Wire :=
+                 Build_Pristine_Wrap_Stream
+                   (C, Key, Sink.Buf (1 .. Sink.Used));
+               Sink.Used := 0;
 
-         Reset_Read (Src);
-         Itb.Streams.Encrypt_Stream_Auth_Triple
-           (Seed_Noise,
-            Seed_Data1, Seed_Data2, Seed_Data3,
-            Seed_Start1, Seed_Start2, Seed_Start3,
-            Mac_Handle,
-            Src'Access, Tx_Low_AEAD_Triple'Access,
-            Stream_Chunk_Size);
+               Reset_Read (Src);
+               Itb.Streams.Encrypt_Stream_Auth_Triple
+                 (Seed_Noise,
+                  Seed_Data1, Seed_Data2, Seed_Data3,
+                  Seed_Start1, Seed_Start2, Seed_Start3,
+                  Mac_Handle, Src'Access, Sink'Access,
+                  Stream_Chunk_Size);
+               Stream_Low_AEAD_Triple_Wires (C).Wire :=
+                 Build_Pristine_Wrap_Stream
+                   (C, Key, Sink.Buf (1 .. Sink.Used));
+               Sink.Used := 0;
 
-         Free (Src);
-      end;
+               Free (Src);
+               Free (Sink);
+            end;
 
-      --  User-Loop transcripts (no-MAC).
-      Tx_Easy_UL_Single := Build_UL_Easy (Enc_Easy_Single'Access);
-      Tx_Easy_UL_Triple := Build_UL_Easy (Enc_Easy_Triple'Access);
-      Tx_Low_UL_Single  := Build_UL_Low_Single;
-      Tx_Low_UL_Triple  := Build_UL_Low_Triple;
+            --  User-Loop wires (no-MAC) — easy + lowlevel × single +
+            --  triple. Builds the inner User-Loop transcript then
+            --  wraps it.
+            declare
+               UL : Byte_Buf_Access;
+            begin
+               UL := Build_UL_Easy (Enc_Easy_Single'Access);
+               Stream_Easy_UL_Single_Wires (C).Wire :=
+                 Build_Pristine_Wrap_Stream (C, Key, UL.all);
+               Free_Buf (UL);
+
+               UL := Build_UL_Easy (Enc_Easy_Triple'Access);
+               Stream_Easy_UL_Triple_Wires (C).Wire :=
+                 Build_Pristine_Wrap_Stream (C, Key, UL.all);
+               Free_Buf (UL);
+
+               UL := Build_UL_Low_Single;
+               Stream_Low_UL_Single_Wires (C).Wire :=
+                 Build_Pristine_Wrap_Stream (C, Key, UL.all);
+               Free_Buf (UL);
+
+               UL := Build_UL_Low_Triple;
+               Stream_Low_UL_Triple_Wires (C).Wire :=
+                 Build_Pristine_Wrap_Stream (C, Key, UL.all);
+               Free_Buf (UL);
+            end;
+         end;
+      end loop;
    end Pre_Compute;
 
    ---------------------------------------------------------------------
@@ -799,41 +952,350 @@ procedure Bench_Wrapper is
    end Run_Wrap_Only_In_Place;
 
    ---------------------------------------------------------------------
-   --  Single Message — Single Ouroboros.
+   --  Single Message — encrypt-direction (full pipeline) + decrypt-
+   --  direction (pristine wire refresh).
+   --
+   --  Encrypt cases: each iter builds the inner ITB ciphertext from
+   --  Single_Plain via the selected mode (Easy / Low-Level × No-MAC /
+   --  MAC × Single / Triple), then wraps the result into a fresh
+   --  on-wire buffer. This mirrors the wrapper/bench_test.go
+   --  encrypt-side pattern (composeWire over Wrap_In_Place).
+   --
+   --  Decrypt cases: setup pre-computes a pristine wire (one ITB
+   --  encrypt + one Wrap_In_Place); the timed loop refreshes a
+   --  working wire from the pristine copy and then runs
+   --  Unwrap_In_Place + ITB decrypt.
    ---------------------------------------------------------------------
 
-   Bench_Mode_CT : Byte_Buf_Access := null;
+   --  Per-iter scratch: a single working wire (Body_Cap + Nonce) and
+   --  a recovered-plaintext sink (Body_Cap). Sized at first use.
+   Msg_Wire_Buf  : Byte_Buf_Access := null;
+   Msg_Plain_Buf : Byte_Buf_Access := null;
 
-   procedure Run_Msg_Single_Encrypt is
-      Key : constant Byte_Array := Cipher_Keys (Bench_Cipher).Key.all;
-      Wire_Ptr : Byte_Buf_Access :=
-        new Byte_Array'(Itb.Wrapper.Wrap
-                          (Bench_Cipher, Key, Bench_Mode_CT.all));
+   procedure Ensure_Msg_Buffers (Wire_Cap, Plain_Cap : Stream_Element_Offset) is
    begin
-      Free_Buf (Wire_Ptr);
-   end Run_Msg_Single_Encrypt;
+      if Msg_Wire_Buf = null or else Msg_Wire_Buf'Length < Wire_Cap then
+         if Msg_Wire_Buf /= null then
+            Free_Buf (Msg_Wire_Buf);
+         end if;
+         Msg_Wire_Buf := new Byte_Array (1 .. Wire_Cap);
+      end if;
+      if Msg_Plain_Buf = null or else Msg_Plain_Buf'Length < Plain_Cap then
+         if Msg_Plain_Buf /= null then
+            Free_Buf (Msg_Plain_Buf);
+         end if;
+         Msg_Plain_Buf := new Byte_Array (1 .. Plain_Cap);
+      end if;
+   end Ensure_Msg_Buffers;
 
-   procedure Run_Msg_Single_Decrypt is
-      Key : constant Byte_Array := Cipher_Keys (Bench_Cipher).Key.all;
-      Wire_Ptr : Byte_Buf_Access :=
-        new Byte_Array'(Itb.Wrapper.Wrap
-                          (Bench_Cipher, Key, Bench_Mode_CT.all));
-      Recov_Ptr : Byte_Buf_Access :=
-        new Byte_Array'(Itb.Wrapper.Unwrap
-                          (Bench_Cipher, Key, Wire_Ptr.all));
+   --  Mode selector for encrypt + decrypt run dispatch.
+   type Msg_Mode_Tag is
+     (Easy_NoMAC_Single,  Easy_Auth_Single,
+      Low_NoMAC_Single,   Low_Auth_Single,
+      Easy_NoMAC_Triple,  Easy_Auth_Triple,
+      Low_NoMAC_Triple,   Low_Auth_Triple);
+
+   Active_Msg_Mode : Msg_Mode_Tag := Easy_NoMAC_Single;
+
+   --  Picks the pristine wire that matches the (cipher, mode)
+   --  selector for decrypt-direction iters.
+   function Active_Msg_Wire return Byte_Buf_Access is
    begin
-      Free_Buf (Wire_Ptr);
-      Free_Buf (Recov_Ptr);
-   end Run_Msg_Single_Decrypt;
+      case Active_Msg_Mode is
+         when Easy_NoMAC_Single =>
+            return Single_Easy_Nomac_Wires (Bench_Cipher).Wire;
+         when Easy_Auth_Single =>
+            return Single_Easy_Auth_Wires (Bench_Cipher).Wire;
+         when Low_NoMAC_Single =>
+            return Single_Low_Nomac_Wires (Bench_Cipher).Wire;
+         when Low_Auth_Single =>
+            return Single_Low_Auth_Wires (Bench_Cipher).Wire;
+         when Easy_NoMAC_Triple =>
+            return Triple_Easy_Nomac_Wires (Bench_Cipher).Wire;
+         when Easy_Auth_Triple =>
+            return Triple_Easy_Auth_Wires (Bench_Cipher).Wire;
+         when Low_NoMAC_Triple =>
+            return Triple_Low_Nomac_Wires (Bench_Cipher).Wire;
+         when Low_Auth_Triple =>
+            return Triple_Low_Auth_Wires (Bench_Cipher).Wire;
+      end case;
+   end Active_Msg_Wire;
+
+   --  Encrypt-direction iter — full pipeline. Allocates the inner
+   --  ITB ciphertext (per iter), then wraps into a fresh wire buffer.
+   --  Mirrors wrapper/bench_test.go's runMessageEasyEncrypt /
+   --  runMessageLowLevel*Encrypt shape.
+   procedure Run_Msg_Encrypt is
+      Key : constant Byte_Array := Cipher_Keys (Bench_Cipher).Key.all;
+      N_Len : constant Stream_Element_Offset :=
+        Stream_Element_Offset (Itb.Wrapper.Nonce_Size (Bench_Cipher));
+      Out_Nonce : Byte_Array (1 .. N_Len);
+   begin
+      case Active_Msg_Mode is
+         when Easy_NoMAC_Single =>
+            declare
+               CT : constant Byte_Array :=
+                 Itb.Encryptor.Encrypt
+                   (Enc_Easy_Single, Single_Plain.all);
+               Wire_Total : constant Stream_Element_Offset :=
+                 N_Len + CT'Length;
+            begin
+               Ensure_Msg_Buffers (Wire_Total, CT'Length);
+               Msg_Wire_Buf (N_Len + 1 .. Wire_Total) := CT;
+               Itb.Wrapper.Wrap_In_Place
+                 (Bench_Cipher, Key,
+                  Msg_Wire_Buf (N_Len + 1 .. Wire_Total), Out_Nonce);
+               Msg_Wire_Buf (1 .. N_Len) := Out_Nonce;
+            end;
+         when Easy_Auth_Single =>
+            declare
+               CT : constant Byte_Array :=
+                 Itb.Encryptor.Encrypt_Auth
+                   (Enc_Easy_Single, Single_Plain.all);
+               Wire_Total : constant Stream_Element_Offset :=
+                 N_Len + CT'Length;
+            begin
+               Ensure_Msg_Buffers (Wire_Total, CT'Length);
+               Msg_Wire_Buf (N_Len + 1 .. Wire_Total) := CT;
+               Itb.Wrapper.Wrap_In_Place
+                 (Bench_Cipher, Key,
+                  Msg_Wire_Buf (N_Len + 1 .. Wire_Total), Out_Nonce);
+               Msg_Wire_Buf (1 .. N_Len) := Out_Nonce;
+            end;
+         when Low_NoMAC_Single =>
+            declare
+               CT : constant Byte_Array :=
+                 Itb.Cipher.Encrypt
+                   (Seed_Noise, Seed_Data1, Seed_Start1,
+                    Single_Plain.all);
+               Wire_Total : constant Stream_Element_Offset :=
+                 N_Len + CT'Length;
+            begin
+               Ensure_Msg_Buffers (Wire_Total, CT'Length);
+               Msg_Wire_Buf (N_Len + 1 .. Wire_Total) := CT;
+               Itb.Wrapper.Wrap_In_Place
+                 (Bench_Cipher, Key,
+                  Msg_Wire_Buf (N_Len + 1 .. Wire_Total), Out_Nonce);
+               Msg_Wire_Buf (1 .. N_Len) := Out_Nonce;
+            end;
+         when Low_Auth_Single =>
+            declare
+               CT : constant Byte_Array :=
+                 Itb.Cipher.Encrypt_Auth
+                   (Seed_Noise, Seed_Data1, Seed_Start1,
+                    Mac_Handle, Single_Plain.all);
+               Wire_Total : constant Stream_Element_Offset :=
+                 N_Len + CT'Length;
+            begin
+               Ensure_Msg_Buffers (Wire_Total, CT'Length);
+               Msg_Wire_Buf (N_Len + 1 .. Wire_Total) := CT;
+               Itb.Wrapper.Wrap_In_Place
+                 (Bench_Cipher, Key,
+                  Msg_Wire_Buf (N_Len + 1 .. Wire_Total), Out_Nonce);
+               Msg_Wire_Buf (1 .. N_Len) := Out_Nonce;
+            end;
+         when Easy_NoMAC_Triple =>
+            declare
+               CT : constant Byte_Array :=
+                 Itb.Encryptor.Encrypt
+                   (Enc_Easy_Triple, Single_Plain.all);
+               Wire_Total : constant Stream_Element_Offset :=
+                 N_Len + CT'Length;
+            begin
+               Ensure_Msg_Buffers (Wire_Total, CT'Length);
+               Msg_Wire_Buf (N_Len + 1 .. Wire_Total) := CT;
+               Itb.Wrapper.Wrap_In_Place
+                 (Bench_Cipher, Key,
+                  Msg_Wire_Buf (N_Len + 1 .. Wire_Total), Out_Nonce);
+               Msg_Wire_Buf (1 .. N_Len) := Out_Nonce;
+            end;
+         when Easy_Auth_Triple =>
+            declare
+               CT : constant Byte_Array :=
+                 Itb.Encryptor.Encrypt_Auth
+                   (Enc_Easy_Triple, Single_Plain.all);
+               Wire_Total : constant Stream_Element_Offset :=
+                 N_Len + CT'Length;
+            begin
+               Ensure_Msg_Buffers (Wire_Total, CT'Length);
+               Msg_Wire_Buf (N_Len + 1 .. Wire_Total) := CT;
+               Itb.Wrapper.Wrap_In_Place
+                 (Bench_Cipher, Key,
+                  Msg_Wire_Buf (N_Len + 1 .. Wire_Total), Out_Nonce);
+               Msg_Wire_Buf (1 .. N_Len) := Out_Nonce;
+            end;
+         when Low_NoMAC_Triple =>
+            declare
+               CT : constant Byte_Array :=
+                 Itb.Cipher.Encrypt_Triple
+                   (Seed_Noise,
+                    Seed_Data1, Seed_Data2, Seed_Data3,
+                    Seed_Start1, Seed_Start2, Seed_Start3,
+                    Single_Plain.all);
+               Wire_Total : constant Stream_Element_Offset :=
+                 N_Len + CT'Length;
+            begin
+               Ensure_Msg_Buffers (Wire_Total, CT'Length);
+               Msg_Wire_Buf (N_Len + 1 .. Wire_Total) := CT;
+               Itb.Wrapper.Wrap_In_Place
+                 (Bench_Cipher, Key,
+                  Msg_Wire_Buf (N_Len + 1 .. Wire_Total), Out_Nonce);
+               Msg_Wire_Buf (1 .. N_Len) := Out_Nonce;
+            end;
+         when Low_Auth_Triple =>
+            declare
+               CT : constant Byte_Array :=
+                 Itb.Cipher.Encrypt_Auth_Triple
+                   (Seed_Noise,
+                    Seed_Data1, Seed_Data2, Seed_Data3,
+                    Seed_Start1, Seed_Start2, Seed_Start3,
+                    Mac_Handle, Single_Plain.all);
+               Wire_Total : constant Stream_Element_Offset :=
+                 N_Len + CT'Length;
+            begin
+               Ensure_Msg_Buffers (Wire_Total, CT'Length);
+               Msg_Wire_Buf (N_Len + 1 .. Wire_Total) := CT;
+               Itb.Wrapper.Wrap_In_Place
+                 (Bench_Cipher, Key,
+                  Msg_Wire_Buf (N_Len + 1 .. Wire_Total), Out_Nonce);
+               Msg_Wire_Buf (1 .. N_Len) := Out_Nonce;
+            end;
+      end case;
+   end Run_Msg_Encrypt;
+
+   --  Decrypt-direction iter. Refreshes a working wire from the
+   --  pristine wire (one memcpy), unwraps in place, then runs the
+   --  matching ITB decrypt against the recovered inner ciphertext.
+   procedure Run_Msg_Decrypt is
+      Key : constant Byte_Array := Cipher_Keys (Bench_Cipher).Key.all;
+      Pristine : constant Byte_Buf_Access := Active_Msg_Wire;
+      Wire_Total : constant Stream_Element_Offset := Pristine'Length;
+      N_Len : constant Stream_Element_Offset :=
+        Stream_Element_Offset (Itb.Wrapper.Nonce_Size (Bench_Cipher));
+      Body_First : Stream_Element_Offset;
+   begin
+      Ensure_Msg_Buffers (Wire_Total, Wire_Total);
+      Msg_Wire_Buf (1 .. Wire_Total) := Pristine.all;
+      Itb.Wrapper.Unwrap_In_Place
+        (Bench_Cipher, Key,
+         Msg_Wire_Buf (1 .. Wire_Total), Body_First);
+      case Active_Msg_Mode is
+         when Easy_NoMAC_Single =>
+            declare
+               PT : constant Byte_Array :=
+                 Itb.Encryptor.Decrypt
+                   (Enc_Easy_Single,
+                    Msg_Wire_Buf (Body_First .. Wire_Total));
+            begin
+               if PT'Length /= Single_Plain.all'Length then
+                  raise Program_Error with "decrypt length mismatch";
+               end if;
+            end;
+         when Easy_Auth_Single =>
+            declare
+               PT : constant Byte_Array :=
+                 Itb.Encryptor.Decrypt_Auth
+                   (Enc_Easy_Single,
+                    Msg_Wire_Buf (Body_First .. Wire_Total));
+            begin
+               if PT'Length /= Single_Plain.all'Length then
+                  raise Program_Error with "decrypt length mismatch";
+               end if;
+            end;
+         when Low_NoMAC_Single =>
+            declare
+               PT : constant Byte_Array :=
+                 Itb.Cipher.Decrypt
+                   (Seed_Noise, Seed_Data1, Seed_Start1,
+                    Msg_Wire_Buf (Body_First .. Wire_Total));
+            begin
+               if PT'Length /= Single_Plain.all'Length then
+                  raise Program_Error with "decrypt length mismatch";
+               end if;
+            end;
+         when Low_Auth_Single =>
+            declare
+               PT : constant Byte_Array :=
+                 Itb.Cipher.Decrypt_Auth
+                   (Seed_Noise, Seed_Data1, Seed_Start1,
+                    Mac_Handle,
+                    Msg_Wire_Buf (Body_First .. Wire_Total));
+            begin
+               if PT'Length /= Single_Plain.all'Length then
+                  raise Program_Error with "decrypt length mismatch";
+               end if;
+            end;
+         when Easy_NoMAC_Triple =>
+            declare
+               PT : constant Byte_Array :=
+                 Itb.Encryptor.Decrypt
+                   (Enc_Easy_Triple,
+                    Msg_Wire_Buf (Body_First .. Wire_Total));
+            begin
+               if PT'Length /= Single_Plain.all'Length then
+                  raise Program_Error with "decrypt length mismatch";
+               end if;
+            end;
+         when Easy_Auth_Triple =>
+            declare
+               PT : constant Byte_Array :=
+                 Itb.Encryptor.Decrypt_Auth
+                   (Enc_Easy_Triple,
+                    Msg_Wire_Buf (Body_First .. Wire_Total));
+            begin
+               if PT'Length /= Single_Plain.all'Length then
+                  raise Program_Error with "decrypt length mismatch";
+               end if;
+            end;
+         when Low_NoMAC_Triple =>
+            declare
+               PT : constant Byte_Array :=
+                 Itb.Cipher.Decrypt_Triple
+                   (Seed_Noise,
+                    Seed_Data1, Seed_Data2, Seed_Data3,
+                    Seed_Start1, Seed_Start2, Seed_Start3,
+                    Msg_Wire_Buf (Body_First .. Wire_Total));
+            begin
+               if PT'Length /= Single_Plain.all'Length then
+                  raise Program_Error with "decrypt length mismatch";
+               end if;
+            end;
+         when Low_Auth_Triple =>
+            declare
+               PT : constant Byte_Array :=
+                 Itb.Cipher.Decrypt_Auth_Triple
+                   (Seed_Noise,
+                    Seed_Data1, Seed_Data2, Seed_Data3,
+                    Seed_Start1, Seed_Start2, Seed_Start3,
+                    Mac_Handle,
+                    Msg_Wire_Buf (Body_First .. Wire_Total));
+            begin
+               if PT'Length /= Single_Plain.all'Length then
+                  raise Program_Error with "decrypt length mismatch";
+               end if;
+            end;
+      end case;
+      pragma Unreferenced (N_Len);
+   end Run_Msg_Decrypt;
 
    ---------------------------------------------------------------------
-   --  Streaming UserLoop — wrap pre-built UL transcript through one
-   --  WrapStreamWriter session per iter (mirrors AEAD shape — both
-   --  measure the wrap layer's per-byte XOR cost on top of the inner
-   --  ITB transcript).
+   --  Streaming — encrypt-direction (full pipeline: stream-encrypt +
+   --  wrap-stream-writer) + decrypt-direction (pristine wire refresh +
+   --  unwrap-stream-reader + stream-decrypt).
+   --
+   --  Encrypt cases: each iter runs stream-encrypt over Stream_Plain
+   --  into a Memory_Stream (inner ITB transcript), then drives
+   --  Wrap_Stream_Writer over the inner transcript to produce the
+   --  final on-wire bytes. Two-stage internally because Wrap_Stream
+   --  is not a Root_Stream_Type'Class — but both stages run within
+   --  the timed loop so the measured time covers ITB encrypt + wrap.
+   --
+   --  Decrypt cases: setup pre-builds one pristine wire (already
+   --  wrap-encrypted). Each iter copies the pristine wire bytes,
+   --  drives Unwrap_Stream_Reader to recover the inner ITB
+   --  transcript, then runs stream-decrypt over the recovered inner
+   --  transcript to obtain the plaintext.
    ---------------------------------------------------------------------
-
-   Bench_UL_Tx : Byte_Buf_Access := null;
 
    --  Heap-resident per-iter scratch buffers shared by every
    --  streaming case. Sized once on first use, reused across iters.
@@ -858,43 +1320,353 @@ procedure Bench_Wrapper is
       end if;
    end Ensure_Iter_Buffers;
 
-   procedure Run_Stream_UL_Encrypt is
+   --  Frames a single User-Loop chunk (u32_LE_len || ct) into Buf at
+   --  position Used + 1; grows Buf if needed; updates Used. Helper
+   --  shared by the encrypt-direction UL drivers below.
+   procedure Append_UL_Chunk
+     (Buf  : in out Byte_Buf_Access;
+      Used : in out Stream_Element_Offset;
+      CT   : Byte_Array)
+   is
+      Need : constant Stream_Element_Offset :=
+        Used + Stream_Element_Offset (4) + CT'Length;
+      CT_Len_LE : Byte_Array (1 .. 4);
+      U32 : constant Unsigned_32 := Unsigned_32 (CT'Length);
+   begin
+      CT_Len_LE (1) := Stream_Element (U32 and 16#FF#);
+      CT_Len_LE (2) := Stream_Element (Shift_Right (U32, 8) and 16#FF#);
+      CT_Len_LE (3) := Stream_Element (Shift_Right (U32, 16) and 16#FF#);
+      CT_Len_LE (4) := Stream_Element (Shift_Right (U32, 24) and 16#FF#);
+      if Need > Buf'Last then
+         declare
+            New_Cap : Stream_Element_Offset := Buf'Last;
+            New_Buf : Byte_Buf_Access;
+         begin
+            while New_Cap < Need loop
+               New_Cap := New_Cap * 2;
+            end loop;
+            New_Buf := new Byte_Array (1 .. New_Cap);
+            New_Buf (1 .. Used) := Buf (1 .. Used);
+            Free_Buf (Buf);
+            Buf := New_Buf;
+         end;
+      end if;
+      Buf (Used + 1 .. Used + 4) := CT_Len_LE;
+      Used := Used + 4;
+      Buf (Used + 1 .. Used + CT'Length) := CT;
+      Used := Used + CT'Length;
+   end Append_UL_Chunk;
+
+   --  Streaming mode selector for run dispatch.
+   type Stream_Mode_Sel is
+     (AEAD_Easy_IO_Single,  AEAD_Easy_IO_Triple,
+      AEAD_Low_IO_Single,   AEAD_Low_IO_Triple,
+      UL_Easy_Single,       UL_Easy_Triple,
+      UL_Low_Single,        UL_Low_Triple);
+
+   Active_Stream : Stream_Mode_Sel := AEAD_Easy_IO_Single;
+
+   --  Picks the pristine wire that matches the (cipher, mode)
+   --  selector for decrypt-direction iters.
+   function Active_Stream_Wire return Byte_Buf_Access is
+   begin
+      case Active_Stream is
+         when AEAD_Easy_IO_Single =>
+            return Stream_Easy_AEAD_Single_Wires (Bench_Cipher).Wire;
+         when AEAD_Easy_IO_Triple =>
+            return Stream_Easy_AEAD_Triple_Wires (Bench_Cipher).Wire;
+         when AEAD_Low_IO_Single =>
+            return Stream_Low_AEAD_Single_Wires (Bench_Cipher).Wire;
+         when AEAD_Low_IO_Triple =>
+            return Stream_Low_AEAD_Triple_Wires (Bench_Cipher).Wire;
+         when UL_Easy_Single =>
+            return Stream_Easy_UL_Single_Wires (Bench_Cipher).Wire;
+         when UL_Easy_Triple =>
+            return Stream_Easy_UL_Triple_Wires (Bench_Cipher).Wire;
+         when UL_Low_Single =>
+            return Stream_Low_UL_Single_Wires (Bench_Cipher).Wire;
+         when UL_Low_Triple =>
+            return Stream_Low_UL_Triple_Wires (Bench_Cipher).Wire;
+      end case;
+   end Active_Stream_Wire;
+
+   --  Encrypt-direction iter: full pipeline. Stage 1 produces the
+   --  inner ITB transcript into Inner_Stream (Memory_Stream); stage
+   --  2 drives Wrap_Stream_Writer over the transcript to produce
+   --  the final wire. Both stages live inside the timed loop.
+   procedure Run_Stream_Encrypt is
       Key : constant Byte_Array := Cipher_Keys (Bench_Cipher).Key.all;
       N_Len : constant Stream_Element_Offset :=
         Stream_Element_Offset (Itb.Wrapper.Nonce_Size (Bench_Cipher));
       Out_Nonce : Byte_Array (1 .. N_Len);
       W : Itb.Wrapper.Wrap_Stream_Writer;
-      N : constant Stream_Element_Offset := Bench_UL_Tx.all'Length;
       Last : Stream_Element_Offset;
    begin
-      Ensure_Iter_Buffers (N);
-      Itb.Wrapper.Initialize (W, Bench_Cipher, Key, Out_Nonce);
-      Itb.Wrapper.Update
-        (W, Bench_UL_Tx.all, Iter_Encrypted (1 .. N), Last);
-      Itb.Wrapper.Close (W);
-   end Run_Stream_UL_Encrypt;
+      --  Stage 1 — produce the inner ITB transcript.
+      Inner_Stream.Used := 0;
+      case Active_Stream is
+         when AEAD_Easy_IO_Single =>
+            Source_Stream.Used := 0;
+            Source_Stream.Pos  := 1;
+            Source_Stream.Write (Stream_Plain.all);
+            Reset_Read (Source_Stream);
+            Itb.Encryptor.Encrypt_Stream_Auth
+              (Enc_Easy_Single, Source_Stream'Access,
+               Inner_Stream'Access, Stream_Chunk_Size);
+         when AEAD_Easy_IO_Triple =>
+            Source_Stream.Used := 0;
+            Source_Stream.Pos  := 1;
+            Source_Stream.Write (Stream_Plain.all);
+            Reset_Read (Source_Stream);
+            Itb.Encryptor.Encrypt_Stream_Auth
+              (Enc_Easy_Triple, Source_Stream'Access,
+               Inner_Stream'Access, Stream_Chunk_Size);
+         when AEAD_Low_IO_Single =>
+            Source_Stream.Used := 0;
+            Source_Stream.Pos  := 1;
+            Source_Stream.Write (Stream_Plain.all);
+            Reset_Read (Source_Stream);
+            Itb.Streams.Encrypt_Stream_Auth
+              (Seed_Noise, Seed_Data1, Seed_Start1, Mac_Handle,
+               Source_Stream'Access, Inner_Stream'Access,
+               Stream_Chunk_Size);
+         when AEAD_Low_IO_Triple =>
+            Source_Stream.Used := 0;
+            Source_Stream.Pos  := 1;
+            Source_Stream.Write (Stream_Plain.all);
+            Reset_Read (Source_Stream);
+            Itb.Streams.Encrypt_Stream_Auth_Triple
+              (Seed_Noise,
+               Seed_Data1, Seed_Data2, Seed_Data3,
+               Seed_Start1, Seed_Start2, Seed_Start3,
+               Mac_Handle, Source_Stream'Access, Inner_Stream'Access,
+               Stream_Chunk_Size);
+         when UL_Easy_Single | UL_Easy_Triple |
+              UL_Low_Single  | UL_Low_Triple =>
+            --  User-Loop transcripts: encrypt each Stream_Chunk_Size
+            --  slice through the matching ITB entry point and frame
+            --  as u32_LE_len || ct. Inner_Stream is the framed
+            --  transcript sink.
+            declare
+               Cur : Stream_Element_Offset := Stream_Plain.all'First;
+               Used : Stream_Element_Offset := 0;
+               Buf : Byte_Buf_Access := new Byte_Array (1 .. 1 * 1024 * 1024);
+            begin
+               while Cur <= Stream_Plain.all'Last loop
+                  declare
+                     Take : constant Stream_Element_Offset :=
+                       Stream_Element_Offset'Min
+                         (Stream_Chunk_Size,
+                          Stream_Plain.all'Last - Cur + 1);
+                  begin
+                     case Active_Stream is
+                        when UL_Easy_Single =>
+                           declare
+                              CT : constant Byte_Array :=
+                                Itb.Encryptor.Encrypt
+                                  (Enc_Easy_Single,
+                                   Stream_Plain.all
+                                     (Cur .. Cur + Take - 1));
+                           begin
+                              Append_UL_Chunk (Buf, Used, CT);
+                           end;
+                        when UL_Easy_Triple =>
+                           declare
+                              CT : constant Byte_Array :=
+                                Itb.Encryptor.Encrypt
+                                  (Enc_Easy_Triple,
+                                   Stream_Plain.all
+                                     (Cur .. Cur + Take - 1));
+                           begin
+                              Append_UL_Chunk (Buf, Used, CT);
+                           end;
+                        when UL_Low_Single =>
+                           declare
+                              CT : constant Byte_Array :=
+                                Itb.Cipher.Encrypt
+                                  (Seed_Noise, Seed_Data1, Seed_Start1,
+                                   Stream_Plain.all
+                                     (Cur .. Cur + Take - 1));
+                           begin
+                              Append_UL_Chunk (Buf, Used, CT);
+                           end;
+                        when UL_Low_Triple =>
+                           declare
+                              CT : constant Byte_Array :=
+                                Itb.Cipher.Encrypt_Triple
+                                  (Seed_Noise,
+                                   Seed_Data1, Seed_Data2, Seed_Data3,
+                                   Seed_Start1, Seed_Start2, Seed_Start3,
+                                   Stream_Plain.all
+                                     (Cur .. Cur + Take - 1));
+                           begin
+                              Append_UL_Chunk (Buf, Used, CT);
+                           end;
+                        when others =>
+                           null;
+                     end case;
+                     Cur := Cur + Take;
+                  end;
+               end loop;
+               Inner_Stream.Write (Buf (1 .. Used));
+               Free_Buf (Buf);
+            end;
+      end case;
 
-   procedure Run_Stream_UL_Decrypt is
+      --  Stage 2 — wrap the inner transcript into the final wire.
+      declare
+         N_Inner : constant Stream_Element_Offset := Inner_Stream.Used;
+      begin
+         Ensure_Iter_Buffers (N_Inner);
+         Itb.Wrapper.Initialize (W, Bench_Cipher, Key, Out_Nonce);
+         Itb.Wrapper.Update
+           (W, Inner_Stream.Buf (1 .. N_Inner),
+            Iter_Encrypted (1 .. N_Inner), Last);
+         Itb.Wrapper.Close (W);
+      end;
+   end Run_Stream_Encrypt;
+
+   --  Decrypt-direction iter: refresh the working wire from the
+   --  pristine pre-built wire, run unwrap-stream-reader to recover
+   --  the inner ITB transcript, then run stream-decrypt to recover
+   --  the plaintext.
+   procedure Run_Stream_Decrypt is
       Key : constant Byte_Array := Cipher_Keys (Bench_Cipher).Key.all;
       N_Len : constant Stream_Element_Offset :=
         Stream_Element_Offset (Itb.Wrapper.Nonce_Size (Bench_Cipher));
-      Out_Nonce : Byte_Array (1 .. N_Len);
-      W : Itb.Wrapper.Wrap_Stream_Writer;
-      N : constant Stream_Element_Offset := Bench_UL_Tx.all'Length;
-      Last : Stream_Element_Offset;
+      Pristine : constant Byte_Buf_Access := Active_Stream_Wire;
+      Wire_Total : constant Stream_Element_Offset := Pristine'Length;
+      Inner_Total : constant Stream_Element_Offset := Wire_Total - N_Len;
+      Wire_Nonce : Byte_Array (1 .. N_Len);
       R : Itb.Wrapper.Unwrap_Stream_Reader;
+      Last : Stream_Element_Offset;
    begin
-      Ensure_Iter_Buffers (N);
-      Itb.Wrapper.Initialize (W, Bench_Cipher, Key, Out_Nonce);
-      Itb.Wrapper.Update
-        (W, Bench_UL_Tx.all, Iter_Encrypted (1 .. N), Last);
-      Itb.Wrapper.Close (W);
+      Ensure_Iter_Buffers (Inner_Total);
+      --  Capture the wire nonce out of the pristine wire (no need
+      --  to re-copy the body — Update reads from Pristine and writes
+      --  the recovered inner transcript to Iter_Decrypted).
+      Wire_Nonce := Pristine (Pristine'First .. Pristine'First + N_Len - 1);
 
-      Itb.Wrapper.Initialize (R, Bench_Cipher, Key, Out_Nonce);
+      Itb.Wrapper.Initialize (R, Bench_Cipher, Key, Wire_Nonce);
       Itb.Wrapper.Update
-        (R, Iter_Encrypted (1 .. N), Iter_Decrypted (1 .. N), Last);
+        (R, Pristine (Pristine'First + N_Len .. Pristine'Last),
+         Iter_Decrypted (1 .. Inner_Total), Last);
       Itb.Wrapper.Close (R);
-   end Run_Stream_UL_Decrypt;
+
+      --  Stage 2 — stream-decrypt the recovered inner transcript.
+      Source_Stream.Used := 0;
+      Source_Stream.Pos  := 1;
+      Source_Stream.Write (Iter_Decrypted (1 .. Inner_Total));
+      Reset_Read (Source_Stream);
+      Plain_Sink.Used := 0;
+
+      case Active_Stream is
+         when AEAD_Easy_IO_Single =>
+            Itb.Encryptor.Decrypt_Stream_Auth
+              (Enc_Easy_Single, Source_Stream'Access,
+               Plain_Sink'Access, Stream_Chunk_Size);
+         when AEAD_Easy_IO_Triple =>
+            Itb.Encryptor.Decrypt_Stream_Auth
+              (Enc_Easy_Triple, Source_Stream'Access,
+               Plain_Sink'Access, Stream_Chunk_Size);
+         when AEAD_Low_IO_Single =>
+            Itb.Streams.Decrypt_Stream_Auth
+              (Seed_Noise, Seed_Data1, Seed_Start1, Mac_Handle,
+               Source_Stream'Access, Plain_Sink'Access,
+               Stream_Chunk_Size);
+         when AEAD_Low_IO_Triple =>
+            Itb.Streams.Decrypt_Stream_Auth_Triple
+              (Seed_Noise,
+               Seed_Data1, Seed_Data2, Seed_Data3,
+               Seed_Start1, Seed_Start2, Seed_Start3,
+               Mac_Handle, Source_Stream'Access, Plain_Sink'Access,
+               Stream_Chunk_Size);
+         when UL_Easy_Single | UL_Easy_Triple |
+              UL_Low_Single  | UL_Low_Triple =>
+            --  User-Loop decrypt: read u32_LE_len || ct frames out
+            --  of Iter_Decrypted, dispatch each chunk through the
+            --  matching ITB decrypt entry point.
+            declare
+               Pos : Stream_Element_Offset := 1;
+               Body_End : constant Stream_Element_Offset := Inner_Total;
+            begin
+               while Pos + 3 <= Body_End loop
+                  declare
+                     L0 : constant Unsigned_32 :=
+                       Unsigned_32 (Iter_Decrypted (Pos));
+                     L1 : constant Unsigned_32 :=
+                       Unsigned_32 (Iter_Decrypted (Pos + 1));
+                     L2 : constant Unsigned_32 :=
+                       Unsigned_32 (Iter_Decrypted (Pos + 2));
+                     L3 : constant Unsigned_32 :=
+                       Unsigned_32 (Iter_Decrypted (Pos + 3));
+                     CT_Len : constant Stream_Element_Offset :=
+                       Stream_Element_Offset
+                         (L0 or Shift_Left (L1, 8)
+                            or Shift_Left (L2, 16)
+                            or Shift_Left (L3, 24));
+                  begin
+                     Pos := Pos + 4;
+                     case Active_Stream is
+                        when UL_Easy_Single =>
+                           declare
+                              PT : constant Byte_Array :=
+                                Itb.Encryptor.Decrypt
+                                  (Enc_Easy_Single,
+                                   Iter_Decrypted (Pos .. Pos + CT_Len - 1));
+                           begin
+                              if PT'Length = 0 then
+                                 raise Program_Error
+                                   with "decrypt empty chunk";
+                              end if;
+                           end;
+                        when UL_Easy_Triple =>
+                           declare
+                              PT : constant Byte_Array :=
+                                Itb.Encryptor.Decrypt
+                                  (Enc_Easy_Triple,
+                                   Iter_Decrypted (Pos .. Pos + CT_Len - 1));
+                           begin
+                              if PT'Length = 0 then
+                                 raise Program_Error
+                                   with "decrypt empty chunk";
+                              end if;
+                           end;
+                        when UL_Low_Single =>
+                           declare
+                              PT : constant Byte_Array :=
+                                Itb.Cipher.Decrypt
+                                  (Seed_Noise, Seed_Data1, Seed_Start1,
+                                   Iter_Decrypted (Pos .. Pos + CT_Len - 1));
+                           begin
+                              if PT'Length = 0 then
+                                 raise Program_Error
+                                   with "decrypt empty chunk";
+                              end if;
+                           end;
+                        when UL_Low_Triple =>
+                           declare
+                              PT : constant Byte_Array :=
+                                Itb.Cipher.Decrypt_Triple
+                                  (Seed_Noise,
+                                   Seed_Data1, Seed_Data2, Seed_Data3,
+                                   Seed_Start1, Seed_Start2, Seed_Start3,
+                                   Iter_Decrypted (Pos .. Pos + CT_Len - 1));
+                           begin
+                              if PT'Length = 0 then
+                                 raise Program_Error
+                                   with "decrypt empty chunk";
+                              end if;
+                           end;
+                        when others =>
+                           null;
+                     end case;
+                     Pos := Pos + CT_Len;
+                  end;
+               end loop;
+            end;
+      end case;
+   end Run_Stream_Decrypt;
 
    ---------------------------------------------------------------------
    --  Bench-case orchestration.
@@ -929,10 +1701,10 @@ procedure Bench_Wrapper is
    end Run_Wrapper_Only_Cases;
 
    procedure Run_Single_Message_Cases is
-      type Mode_Slug is record
-         Tag           : access constant String;
-         CT_Single     : Byte_Buf_Access;
-         CT_Triple     : Byte_Buf_Access;
+      type Msg_Case is record
+         Tag    : access constant String;
+         Single : Msg_Mode_Tag;
+         Triple : Msg_Mode_Tag;
       end record;
       Easy_Nomac_Tag    : aliased constant String := "easy_nomac";
       Easy_Auth_Tag     : aliased constant String := "easy_auth";
@@ -940,137 +1712,43 @@ procedure Bench_Wrapper is
       Low_Auth_Tag      : aliased constant String := "lowlevel_auth";
    begin
       declare
-         Modes : constant array (1 .. 4) of Mode_Slug :=
-           [(Easy_Nomac_Tag'Access, Single_Easy_Nomac, Triple_Easy_Nomac),
-            (Easy_Auth_Tag'Access,  Single_Easy_Auth,  Triple_Easy_Auth),
-            (Low_Nomac_Tag'Access,  Single_Low_Nomac,  Triple_Low_Nomac),
-            (Low_Auth_Tag'Access,   Single_Low_Auth,   Triple_Low_Auth)];
+         Modes : constant array (1 .. 4) of Msg_Case :=
+           [(Easy_Nomac_Tag'Access, Easy_NoMAC_Single, Easy_NoMAC_Triple),
+            (Easy_Auth_Tag'Access,  Easy_Auth_Single,  Easy_Auth_Triple),
+            (Low_Nomac_Tag'Access,  Low_NoMAC_Single,  Low_NoMAC_Triple),
+            (Low_Auth_Tag'Access,   Low_Auth_Single,   Low_Auth_Triple)];
       begin
          for C in Outer_Cipher loop
             Bench_Cipher := C;
             for M of Modes loop
-               --  Single Ouroboros (encrypt + decrypt)
-               Bench_Mode_CT := M.CT_Single;
+               --  Single Ouroboros (encrypt + decrypt — full pipeline)
+               Active_Msg_Mode := M.Single;
                Measure
                  ("bench_message_single_" & M.Tag.all & "_"
                   & Cipher_Slug (C) & "_encrypt_16mb",
-                  Run_Msg_Single_Encrypt'Access,
+                  Run_Msg_Encrypt'Access,
                   Single_Message_Bytes, Min_Seconds);
                Measure
                  ("bench_message_single_" & M.Tag.all & "_"
                   & Cipher_Slug (C) & "_decrypt_16mb",
-                  Run_Msg_Single_Decrypt'Access,
+                  Run_Msg_Decrypt'Access,
                   Single_Message_Bytes, Min_Seconds);
-               --  Triple Ouroboros (encrypt + decrypt)
-               Bench_Mode_CT := M.CT_Triple;
+               --  Triple Ouroboros (encrypt + decrypt — full pipeline)
+               Active_Msg_Mode := M.Triple;
                Measure
                  ("bench_message_triple_" & M.Tag.all & "_"
                   & Cipher_Slug (C) & "_encrypt_16mb",
-                  Run_Msg_Single_Encrypt'Access,
+                  Run_Msg_Encrypt'Access,
                   Single_Message_Bytes, Min_Seconds);
                Measure
                  ("bench_message_triple_" & M.Tag.all & "_"
                   & Cipher_Slug (C) & "_decrypt_16mb",
-                  Run_Msg_Single_Decrypt'Access,
+                  Run_Msg_Decrypt'Access,
                   Single_Message_Bytes, Min_Seconds);
             end loop;
          end loop;
       end;
    end Run_Single_Message_Cases;
-
-   --  Picks the active AEAD transcript from the running Bench_Stream_Tx
-   --  selector. Library-level pointer ban (RM 3.10.2 accessibility)
-   --  rules out a per-iter access pointer, so a small 1..4 selector
-   --  routes the pointer pick at iter time.
-   type AEAD_Selector is (Easy_Single, Easy_Triple, Low_Single,
-                          Low_Triple);
-   Active_AEAD : AEAD_Selector := Easy_Single;
-
-   --  Re-declare Run_Stream_Aead_* as named-by-selector variants so
-   --  the Run_Once_Proc takes a parameterless body but the body picks
-   --  the right transcript via the global selector.
-   procedure Run_Stream_Aead_By_Selector_Encrypt is
-      Key : constant Byte_Array := Cipher_Keys (Bench_Cipher).Key.all;
-      N_Len : constant Stream_Element_Offset :=
-        Stream_Element_Offset (Itb.Wrapper.Nonce_Size (Bench_Cipher));
-      Out_Nonce : Byte_Array (1 .. N_Len);
-      W : Itb.Wrapper.Wrap_Stream_Writer;
-      Tx_Bytes : Stream_Element_Offset := 0;
-      Last : Stream_Element_Offset;
-   begin
-      case Active_AEAD is
-         when Easy_Single => Tx_Bytes := Tx_Easy_AEAD_Single.Used;
-         when Easy_Triple => Tx_Bytes := Tx_Easy_AEAD_Triple.Used;
-         when Low_Single  => Tx_Bytes := Tx_Low_AEAD_Single.Used;
-         when Low_Triple  => Tx_Bytes := Tx_Low_AEAD_Triple.Used;
-      end case;
-      Ensure_Iter_Buffers (Tx_Bytes);
-      Itb.Wrapper.Initialize (W, Bench_Cipher, Key, Out_Nonce);
-      case Active_AEAD is
-         when Easy_Single =>
-            Itb.Wrapper.Update
-              (W, Tx_Easy_AEAD_Single.Buf (1 .. Tx_Bytes),
-               Iter_Encrypted (1 .. Tx_Bytes), Last);
-         when Easy_Triple =>
-            Itb.Wrapper.Update
-              (W, Tx_Easy_AEAD_Triple.Buf (1 .. Tx_Bytes),
-               Iter_Encrypted (1 .. Tx_Bytes), Last);
-         when Low_Single  =>
-            Itb.Wrapper.Update
-              (W, Tx_Low_AEAD_Single.Buf (1 .. Tx_Bytes),
-               Iter_Encrypted (1 .. Tx_Bytes), Last);
-         when Low_Triple  =>
-            Itb.Wrapper.Update
-              (W, Tx_Low_AEAD_Triple.Buf (1 .. Tx_Bytes),
-               Iter_Encrypted (1 .. Tx_Bytes), Last);
-      end case;
-      Itb.Wrapper.Close (W);
-   end Run_Stream_Aead_By_Selector_Encrypt;
-
-   procedure Run_Stream_Aead_By_Selector_Decrypt is
-      Key : constant Byte_Array := Cipher_Keys (Bench_Cipher).Key.all;
-      N_Len : constant Stream_Element_Offset :=
-        Stream_Element_Offset (Itb.Wrapper.Nonce_Size (Bench_Cipher));
-      Out_Nonce : Byte_Array (1 .. N_Len);
-      W : Itb.Wrapper.Wrap_Stream_Writer;
-      Tx_Bytes : Stream_Element_Offset := 0;
-      Last : Stream_Element_Offset;
-      R : Itb.Wrapper.Unwrap_Stream_Reader;
-   begin
-      case Active_AEAD is
-         when Easy_Single => Tx_Bytes := Tx_Easy_AEAD_Single.Used;
-         when Easy_Triple => Tx_Bytes := Tx_Easy_AEAD_Triple.Used;
-         when Low_Single  => Tx_Bytes := Tx_Low_AEAD_Single.Used;
-         when Low_Triple  => Tx_Bytes := Tx_Low_AEAD_Triple.Used;
-      end case;
-      Ensure_Iter_Buffers (Tx_Bytes);
-      Itb.Wrapper.Initialize (W, Bench_Cipher, Key, Out_Nonce);
-      case Active_AEAD is
-         when Easy_Single =>
-            Itb.Wrapper.Update
-              (W, Tx_Easy_AEAD_Single.Buf (1 .. Tx_Bytes),
-               Iter_Encrypted (1 .. Tx_Bytes), Last);
-         when Easy_Triple =>
-            Itb.Wrapper.Update
-              (W, Tx_Easy_AEAD_Triple.Buf (1 .. Tx_Bytes),
-               Iter_Encrypted (1 .. Tx_Bytes), Last);
-         when Low_Single  =>
-            Itb.Wrapper.Update
-              (W, Tx_Low_AEAD_Single.Buf (1 .. Tx_Bytes),
-               Iter_Encrypted (1 .. Tx_Bytes), Last);
-         when Low_Triple  =>
-            Itb.Wrapper.Update
-              (W, Tx_Low_AEAD_Triple.Buf (1 .. Tx_Bytes),
-               Iter_Encrypted (1 .. Tx_Bytes), Last);
-      end case;
-      Itb.Wrapper.Close (W);
-
-      Itb.Wrapper.Initialize (R, Bench_Cipher, Key, Out_Nonce);
-      Itb.Wrapper.Update
-        (R, Iter_Encrypted (1 .. Tx_Bytes),
-         Iter_Decrypted (1 .. Tx_Bytes), Last);
-      Itb.Wrapper.Close (R);
-   end Run_Stream_Aead_By_Selector_Decrypt;
 
    procedure Run_Streaming_Cases is
       type Stream_Mode_Tag is
@@ -1094,96 +1772,96 @@ procedure Bench_Wrapper is
          for Tag in Stream_Mode_Tag loop
             case Tag is
                when AEAD_Easy_IO =>
-                  Active_AEAD := Easy_Single;
+                  Active_Stream := AEAD_Easy_IO_Single;
                   Measure
                     ("bench_stream_single_" & Tags (Tag).all & "_"
                      & Cipher_Slug (C) & "_encrypt_64mb",
-                     Run_Stream_Aead_By_Selector_Encrypt'Access,
+                     Run_Stream_Encrypt'Access,
                      Stream_Payload_Bytes, Min_Seconds);
                   Measure
                     ("bench_stream_single_" & Tags (Tag).all & "_"
                      & Cipher_Slug (C) & "_decrypt_64mb",
-                     Run_Stream_Aead_By_Selector_Decrypt'Access,
+                     Run_Stream_Decrypt'Access,
                      Stream_Payload_Bytes, Min_Seconds);
-                  Active_AEAD := Easy_Triple;
+                  Active_Stream := AEAD_Easy_IO_Triple;
                   Measure
                     ("bench_stream_triple_" & Tags (Tag).all & "_"
                      & Cipher_Slug (C) & "_encrypt_64mb",
-                     Run_Stream_Aead_By_Selector_Encrypt'Access,
+                     Run_Stream_Encrypt'Access,
                      Stream_Payload_Bytes, Min_Seconds);
                   Measure
                     ("bench_stream_triple_" & Tags (Tag).all & "_"
                      & Cipher_Slug (C) & "_decrypt_64mb",
-                     Run_Stream_Aead_By_Selector_Decrypt'Access,
+                     Run_Stream_Decrypt'Access,
                      Stream_Payload_Bytes, Min_Seconds);
                when AEAD_Low_IO =>
-                  Active_AEAD := Low_Single;
+                  Active_Stream := AEAD_Low_IO_Single;
                   Measure
                     ("bench_stream_single_" & Tags (Tag).all & "_"
                      & Cipher_Slug (C) & "_encrypt_64mb",
-                     Run_Stream_Aead_By_Selector_Encrypt'Access,
+                     Run_Stream_Encrypt'Access,
                      Stream_Payload_Bytes, Min_Seconds);
                   Measure
                     ("bench_stream_single_" & Tags (Tag).all & "_"
                      & Cipher_Slug (C) & "_decrypt_64mb",
-                     Run_Stream_Aead_By_Selector_Decrypt'Access,
+                     Run_Stream_Decrypt'Access,
                      Stream_Payload_Bytes, Min_Seconds);
-                  Active_AEAD := Low_Triple;
+                  Active_Stream := AEAD_Low_IO_Triple;
                   Measure
                     ("bench_stream_triple_" & Tags (Tag).all & "_"
                      & Cipher_Slug (C) & "_encrypt_64mb",
-                     Run_Stream_Aead_By_Selector_Encrypt'Access,
+                     Run_Stream_Encrypt'Access,
                      Stream_Payload_Bytes, Min_Seconds);
                   Measure
                     ("bench_stream_triple_" & Tags (Tag).all & "_"
                      & Cipher_Slug (C) & "_decrypt_64mb",
-                     Run_Stream_Aead_By_Selector_Decrypt'Access,
+                     Run_Stream_Decrypt'Access,
                      Stream_Payload_Bytes, Min_Seconds);
                when NoAEAD_Easy_UL =>
-                  Bench_UL_Tx := Tx_Easy_UL_Single;
+                  Active_Stream := UL_Easy_Single;
                   Measure
                     ("bench_stream_single_" & Tags (Tag).all & "_"
                      & Cipher_Slug (C) & "_encrypt_64mb",
-                     Run_Stream_UL_Encrypt'Access,
+                     Run_Stream_Encrypt'Access,
                      Stream_Payload_Bytes, Min_Seconds);
                   Measure
                     ("bench_stream_single_" & Tags (Tag).all & "_"
                      & Cipher_Slug (C) & "_decrypt_64mb",
-                     Run_Stream_UL_Decrypt'Access,
+                     Run_Stream_Decrypt'Access,
                      Stream_Payload_Bytes, Min_Seconds);
-                  Bench_UL_Tx := Tx_Easy_UL_Triple;
+                  Active_Stream := UL_Easy_Triple;
                   Measure
                     ("bench_stream_triple_" & Tags (Tag).all & "_"
                      & Cipher_Slug (C) & "_encrypt_64mb",
-                     Run_Stream_UL_Encrypt'Access,
+                     Run_Stream_Encrypt'Access,
                      Stream_Payload_Bytes, Min_Seconds);
                   Measure
                     ("bench_stream_triple_" & Tags (Tag).all & "_"
                      & Cipher_Slug (C) & "_decrypt_64mb",
-                     Run_Stream_UL_Decrypt'Access,
+                     Run_Stream_Decrypt'Access,
                      Stream_Payload_Bytes, Min_Seconds);
                when NoAEAD_Low_UL =>
-                  Bench_UL_Tx := Tx_Low_UL_Single;
+                  Active_Stream := UL_Low_Single;
                   Measure
                     ("bench_stream_single_" & Tags (Tag).all & "_"
                      & Cipher_Slug (C) & "_encrypt_64mb",
-                     Run_Stream_UL_Encrypt'Access,
+                     Run_Stream_Encrypt'Access,
                      Stream_Payload_Bytes, Min_Seconds);
                   Measure
                     ("bench_stream_single_" & Tags (Tag).all & "_"
                      & Cipher_Slug (C) & "_decrypt_64mb",
-                     Run_Stream_UL_Decrypt'Access,
+                     Run_Stream_Decrypt'Access,
                      Stream_Payload_Bytes, Min_Seconds);
-                  Bench_UL_Tx := Tx_Low_UL_Triple;
+                  Active_Stream := UL_Low_Triple;
                   Measure
                     ("bench_stream_triple_" & Tags (Tag).all & "_"
                      & Cipher_Slug (C) & "_encrypt_64mb",
-                     Run_Stream_UL_Encrypt'Access,
+                     Run_Stream_Encrypt'Access,
                      Stream_Payload_Bytes, Min_Seconds);
                   Measure
                     ("bench_stream_triple_" & Tags (Tag).all & "_"
                      & Cipher_Slug (C) & "_decrypt_64mb",
-                     Run_Stream_UL_Decrypt'Access,
+                     Run_Stream_Decrypt'Access,
                      Stream_Payload_Bytes, Min_Seconds);
             end case;
          end loop;
@@ -1220,22 +1898,58 @@ begin
    --  Cleanup heap allocations.
    Free_Buf (Wrap_Plain);
    Free_Buf (Single_Plain);
-   Free_Buf (Single_Easy_Nomac);
-   Free_Buf (Single_Easy_Auth);
-   Free_Buf (Single_Low_Nomac);
-   Free_Buf (Single_Low_Auth);
-   Free_Buf (Triple_Easy_Nomac);
-   Free_Buf (Triple_Easy_Auth);
-   Free_Buf (Triple_Low_Nomac);
-   Free_Buf (Triple_Low_Auth);
    Free_Buf (Stream_Plain);
-   Free_Buf (Tx_Easy_UL_Single);
-   Free_Buf (Tx_Easy_UL_Triple);
-   Free_Buf (Tx_Low_UL_Single);
-   Free_Buf (Tx_Low_UL_Triple);
    for C in Outer_Cipher loop
       if Cipher_Keys (C).Key /= null then
          Free_Buf (Cipher_Keys (C).Key);
+      end if;
+      if Single_Easy_Nomac_Wires (C).Wire /= null then
+         Free_Buf (Single_Easy_Nomac_Wires (C).Wire);
+      end if;
+      if Single_Easy_Auth_Wires (C).Wire /= null then
+         Free_Buf (Single_Easy_Auth_Wires (C).Wire);
+      end if;
+      if Single_Low_Nomac_Wires (C).Wire /= null then
+         Free_Buf (Single_Low_Nomac_Wires (C).Wire);
+      end if;
+      if Single_Low_Auth_Wires (C).Wire /= null then
+         Free_Buf (Single_Low_Auth_Wires (C).Wire);
+      end if;
+      if Triple_Easy_Nomac_Wires (C).Wire /= null then
+         Free_Buf (Triple_Easy_Nomac_Wires (C).Wire);
+      end if;
+      if Triple_Easy_Auth_Wires (C).Wire /= null then
+         Free_Buf (Triple_Easy_Auth_Wires (C).Wire);
+      end if;
+      if Triple_Low_Nomac_Wires (C).Wire /= null then
+         Free_Buf (Triple_Low_Nomac_Wires (C).Wire);
+      end if;
+      if Triple_Low_Auth_Wires (C).Wire /= null then
+         Free_Buf (Triple_Low_Auth_Wires (C).Wire);
+      end if;
+      if Stream_Easy_AEAD_Single_Wires (C).Wire /= null then
+         Free_Buf (Stream_Easy_AEAD_Single_Wires (C).Wire);
+      end if;
+      if Stream_Easy_AEAD_Triple_Wires (C).Wire /= null then
+         Free_Buf (Stream_Easy_AEAD_Triple_Wires (C).Wire);
+      end if;
+      if Stream_Low_AEAD_Single_Wires (C).Wire /= null then
+         Free_Buf (Stream_Low_AEAD_Single_Wires (C).Wire);
+      end if;
+      if Stream_Low_AEAD_Triple_Wires (C).Wire /= null then
+         Free_Buf (Stream_Low_AEAD_Triple_Wires (C).Wire);
+      end if;
+      if Stream_Easy_UL_Single_Wires (C).Wire /= null then
+         Free_Buf (Stream_Easy_UL_Single_Wires (C).Wire);
+      end if;
+      if Stream_Easy_UL_Triple_Wires (C).Wire /= null then
+         Free_Buf (Stream_Easy_UL_Triple_Wires (C).Wire);
+      end if;
+      if Stream_Low_UL_Single_Wires (C).Wire /= null then
+         Free_Buf (Stream_Low_UL_Single_Wires (C).Wire);
+      end if;
+      if Stream_Low_UL_Triple_Wires (C).Wire /= null then
+         Free_Buf (Stream_Low_UL_Triple_Wires (C).Wire);
       end if;
    end loop;
    if Wrap_Only_Scratch /= null then
@@ -1250,10 +1964,14 @@ begin
    if Iter_Decrypted /= null then
       Free_Buf (Iter_Decrypted);
    end if;
+   if Msg_Wire_Buf /= null then
+      Free_Buf (Msg_Wire_Buf);
+   end if;
+   if Msg_Plain_Buf /= null then
+      Free_Buf (Msg_Plain_Buf);
+   end if;
    Free (Source_Stream);
    Free (Sink_Stream);
-   Free (Tx_Easy_AEAD_Single);
-   Free (Tx_Easy_AEAD_Triple);
-   Free (Tx_Low_AEAD_Single);
-   Free (Tx_Low_AEAD_Triple);
+   Free (Inner_Stream);
+   Free (Plain_Sink);
 end Bench_Wrapper;

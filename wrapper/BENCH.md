@@ -34,51 +34,49 @@ Filter by case-name substring via the `ITB_BENCH_FILTER` environment variable th
 * Single-message plaintext: 16 MiB random.
 * Streaming plaintext: 64 MiB random; chunk size 16 MiB.
 
-## Wrapper Only round-trip (16 MiB plaintext, encrypt + decrypt timed together)
+## Wrapper only round-trip (16 MiB plaintext, encrypt + decrypt timed together)
 
-| Outer cipher | `Wrap` (alloc) MB/s | `Wrap_In_Place` (zero alloc) MB/s |
+| Outer cipher | `Wrap` (alloc) MB/s | `WrapInPlace` (zero alloc) MB/s |
 |---|---|---|
-| **AES-128-CTR** | TBD | TBD |
-| **ChaCha20** | TBD | TBD |
-| **SipHash-CTR** | TBD | TBD |
-
-`Wrap_In_Place` mutates the caller's blob and returns the per-stream nonce; the steady-state allocation is one nonce buffer (~16 bytes) per call. `Wrap` returns a fresh wire = `nonce || keystream-XOR(blob)` and allocates `len(nonce) + len(blob)` bytes per call.
+| **AES-128-CTR** | 1634 | **2440** |
+| **ChaCha20** | 298 | **314** |
+| **SipHash-CTR** | 251 | **263** |
 
 ## Single Message — Single Ouroboros (16 MiB plaintext)
 
 | Mode | AES Enc | AES Dec | ChaCha Enc | ChaCha Dec | SipHash Enc | SipHash Dec |
 |---|---|---|---|---|---|---|
-| **Easy** No MAC | TBD | TBD | TBD | TBD | TBD | TBD |
-| **Easy** MAC Authenticated | TBD | TBD | TBD | TBD | TBD | TBD |
-| **Low-Level** No MAC | TBD | TBD | TBD | TBD | TBD | TBD |
-| **Low-Level** MAC Authenticated | TBD | TBD | TBD | TBD | TBD | TBD |
+| **Easy** No MAC | 191 | 271 | 145 | 191 | 138 | 177 |
+| **Easy** MAC Authenticated | 174 | 257 | 136 | 182 | 131 | 170 |
+| **Low-Level** No MAC | 194 | 277 | 147 | 194 | 140 | 179 |
+| **Low-Level** MAC Authenticated | 176 | 259 | 139 | 182 | 132 | 170 |
 
 ## Single Message — Triple Ouroboros (16 MiB plaintext)
 
 | Mode | AES Enc | AES Dec | ChaCha Enc | ChaCha Dec | SipHash Enc | SipHash Dec |
 |---|---|---|---|---|---|---|
-| **Easy** No MAC | TBD | TBD | TBD | TBD | TBD | TBD |
-| **Easy** MAC Authenticated | TBD | TBD | TBD | TBD | TBD | TBD |
-| **Low-Level** No MAC | TBD | TBD | TBD | TBD | TBD | TBD |
-| **Low-Level** MAC Authenticated | TBD | TBD | TBD | TBD | TBD | TBD |
+| **Easy** No MAC | 264 | 316 | 187 | 211 | 174 | 196 |
+| **Easy** MAC Authenticated | 236 | 292 | 171 | 201 | 157 | 186 |
+| **Low-Level** No MAC | 264 | 319 | 188 | 212 | 176 | 197 |
+| **Low-Level** MAC Authenticated | 238 | 295 | 173 | 202 | 162 | 188 |
 
 ## Streaming — Single Ouroboros (64 MiB plaintext, 16 MiB chunk size)
 
 | Mode | AES Enc | AES Dec | ChaCha Enc | ChaCha Dec | SipHash Enc | SipHash Dec |
 |---|---|---|---|---|---|---|
-| **Streaming AEAD Easy** IO-Driven | TBD | TBD | TBD | TBD | TBD | TBD |
-| **Streaming AEAD Low-Level** IO-Driven | TBD | TBD | TBD | TBD | TBD | TBD |
-| **Streaming Easy** No MAC, User-Driven Loop | TBD | TBD | TBD | TBD | TBD | TBD |
-| **Streaming Low-Level** No MAC, User-Driven Loop | TBD | TBD | TBD | TBD | TBD | TBD |
+| **Streaming AEAD Easy** IO-Driven | 165 | 212 | 132 | 160 | 127 | 151 |
+| **Streaming AEAD Low-Level** IO-Driven | 153 | 149 | 129 | 120 | 124 | 116 |
+| **Streaming Easy** No MAC, User-Driven Loop | 153 | 273 | 124 | 191 | 118 | 181 |
+| **Streaming Low-Level** No MAC, User-Driven Loop | 153 | 276 | 125 | 195 | 119 | 182 |
 
 ## Streaming — Triple Ouroboros (64 MiB plaintext, 16 MiB chunk size)
 
 | Mode | AES Enc | AES Dec | ChaCha Enc | ChaCha Dec | SipHash Enc | SipHash Dec |
 |---|---|---|---|---|---|---|
-| **Streaming AEAD Easy** IO-Driven | TBD | TBD | TBD | TBD | TBD | TBD |
-| **Streaming AEAD Low-Level** IO-Driven | TBD | TBD | TBD | TBD | TBD | TBD |
-| **Streaming Easy** No MAC, User-Driven Loop | TBD | TBD | TBD | TBD | TBD | TBD |
-| **Streaming Low-Level** No MAC, User-Driven Loop | TBD | TBD | TBD | TBD | TBD | TBD |
+| **Streaming AEAD Easy** IO-Driven | 224 | 253 | 166 | 181 | 156 | 171 |
+| **Streaming AEAD Low-Level** IO-Driven | 215 | 168 | 162 | 134 | 153 | 127 |
+| **Streaming Easy** No MAC, User-Driven Loop | 198 | 314 | 151 | 212 | 143 | 197 |
+| **Streaming Low-Level** No MAC, User-Driven Loop | 200 | 317 | 153 | 214 | 144 | 198 |
 
 ## Sub-bench inventory
 
