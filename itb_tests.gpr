@@ -48,7 +48,8 @@ project Itb_Tests is
                  "test_easy_roundtrip.adb",
                  "test_easy_streams.adb",
                  "test_streams_auth.adb",
-                 "test_easy_streams_auth.adb");
+                 "test_easy_streams_auth.adb",
+                 "test_wrapper.adb");
 
    package Compiler renames Itb.Compiler;
 

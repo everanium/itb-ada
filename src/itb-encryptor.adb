@@ -1054,7 +1054,7 @@ package body Itb.Encryptor is
    --  cache (Self.Cache) via Ensure_Capacity + retry-once on
    --  Buffer_Too_Small, mirroring Cipher_Call's reference shape — the
    --  hot loop amortises the allocation across every chunk just like
-   --  the single-shot Easy Mode path does. Returning the ciphertext
+   --  the Single Message Easy Mode path does. Returning the ciphertext
    --  through the sink keeps the per-chunk output buffer entirely on
    --  the heap; with a 16 MiB Chunk_Size the ciphertext is ~20 MiB,
    --  which would burst the default 8 MiB thread stack as a returned
@@ -1497,7 +1497,7 @@ package body Itb.Encryptor is
    end Decrypt_Stream_Auth;
 
    ---------------------------------------------------------------------
-   --  Plain stream helpers — single-shot Easy_Encrypt / Easy_Decrypt
+   --  Plain stream helpers — Single Message Easy_Encrypt / Easy_Decrypt
    --  per chunk, with chunk boundaries carried in ITB's own per-chunk
    --  header (nonce + W + H) parsed via Parse_Chunk_Len.
    ---------------------------------------------------------------------

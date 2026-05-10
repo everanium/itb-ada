@@ -1049,4 +1049,132 @@ package Itb.Sys is
    with Import => True, Convention => C,
         External_Name => "ITB_Easy_DecryptStreamAuth";
 
+   ---------------------------------------------------------------------
+   --  Format-deniability wrapper.
+   ---------------------------------------------------------------------
+   --
+   --  Twelve entry points covering the wrapper surface:
+   --    * Two metadata getters (KeySize / NonceSize)
+   --    * Four Single Message calls (Wrap / Unwrap + WrapInPlace /
+   --      UnwrapInPlace)
+   --    * Six streaming-handle calls
+   --      (WrapStreamWriter_Init/_Update/_Free +
+   --       UnwrapStreamReader_Init/_Update/_Free)
+   --
+   --  The cipher_name argument selects the outer keystream cipher:
+   --  "aes" (AES-128-CTR — 16-byte key + 16-byte nonce), "chacha"
+   --  (ChaCha20 (RFC8439) — 32-byte key + 12-byte nonce), or "siphash"
+   --  (SipHash-2-4 in CTR mode — 16-byte key + 16-byte nonce). All
+   --  three FFI strings are NUL-terminated.
+
+   function ITB_WrapperKeySize
+     (Cipher_Name : C_String;
+      Out_Size    : access Size_T)
+      return C_Int
+   with Import => True, Convention => C,
+        External_Name => "ITB_WrapperKeySize";
+
+   function ITB_WrapperNonceSize
+     (Cipher_Name : C_String;
+      Out_Size    : access Size_T)
+      return C_Int
+   with Import => True, Convention => C,
+        External_Name => "ITB_WrapperNonceSize";
+
+   function ITB_Wrap
+     (Cipher_Name : C_String;
+      Key         : System.Address;
+      Key_Len     : Size_T;
+      Blob        : System.Address;
+      Blob_Len    : Size_T;
+      Out_Buf     : System.Address;
+      Out_Cap     : Size_T;
+      Out_Len     : access Size_T)
+      return C_Int
+   with Import => True, Convention => C, External_Name => "ITB_Wrap";
+
+   function ITB_Unwrap
+     (Cipher_Name : C_String;
+      Key         : System.Address;
+      Key_Len     : Size_T;
+      Wire        : System.Address;
+      Wire_Len    : Size_T;
+      Out_Buf     : System.Address;
+      Out_Cap     : Size_T;
+      Out_Len     : access Size_T)
+      return C_Int
+   with Import => True, Convention => C, External_Name => "ITB_Unwrap";
+
+   function ITB_WrapInPlace
+     (Cipher_Name : C_String;
+      Key         : System.Address;
+      Key_Len     : Size_T;
+      Blob        : System.Address;
+      Blob_Len    : Size_T;
+      Out_Nonce   : System.Address;
+      Nonce_Cap   : Size_T)
+      return C_Int
+   with Import => True, Convention => C,
+        External_Name => "ITB_WrapInPlace";
+
+   function ITB_UnwrapInPlace
+     (Cipher_Name : C_String;
+      Key         : System.Address;
+      Key_Len     : Size_T;
+      Wire        : System.Address;
+      Wire_Len    : Size_T)
+      return C_Int
+   with Import => True, Convention => C,
+        External_Name => "ITB_UnwrapInPlace";
+
+   function ITB_WrapStreamWriter_Init
+     (Cipher_Name : C_String;
+      Key         : System.Address;
+      Key_Len     : Size_T;
+      Out_Nonce   : System.Address;
+      Nonce_Cap   : Size_T;
+      Out_Handle  : access Handle)
+      return C_Int
+   with Import => True, Convention => C,
+        External_Name => "ITB_WrapStreamWriter_Init";
+
+   function ITB_WrapStreamWriter_Update
+     (H        : Handle;
+      Src      : System.Address;
+      Src_Len  : Size_T;
+      Dst      : System.Address;
+      Dst_Cap  : Size_T)
+      return C_Int
+   with Import => True, Convention => C,
+        External_Name => "ITB_WrapStreamWriter_Update";
+
+   function ITB_WrapStreamWriter_Free (H : Handle) return C_Int
+   with Import => True, Convention => C,
+        External_Name => "ITB_WrapStreamWriter_Free";
+
+   function ITB_UnwrapStreamReader_Init
+     (Cipher_Name : C_String;
+      Key         : System.Address;
+      Key_Len     : Size_T;
+      Wire_Nonce  : System.Address;
+      Nonce_Len   : Size_T;
+      Out_Handle  : access Handle)
+      return C_Int
+   with Import => True, Convention => C,
+        External_Name => "ITB_UnwrapStreamReader_Init";
+
+   function ITB_UnwrapStreamReader_Update
+     (H        : Handle;
+      Src      : System.Address;
+      Src_Len  : Size_T;
+      Dst      : System.Address;
+      Dst_Cap  : Size_T)
+      return C_Int
+   with Import => True, Convention => C,
+        External_Name => "ITB_UnwrapStreamReader_Update";
+
+   function ITB_UnwrapStreamReader_Free (H : Handle) return C_Int
+   with Import => True, Convention => C,
+        External_Name => "ITB_UnwrapStreamReader_Free";
+
 end Itb.Sys;

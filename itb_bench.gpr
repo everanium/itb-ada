@@ -22,7 +22,7 @@ project Itb_Bench is
    for Object_Dir use "obj-bench";
    for Exec_Dir use "obj-bench";
    for Main use ("bench_single.adb", "bench_triple.adb",
-                 "bench_stream.adb");
+                 "bench_stream.adb", "bench_wrapper.adb");
 
    package Compiler is
       for Default_Switches ("Ada") use

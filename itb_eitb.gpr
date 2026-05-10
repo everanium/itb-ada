@@ -1,0 +1,30 @@
+--  itb_eitb.gpr — Ada eitb tool project.
+--
+--  Builds the per-binding eitb wrapper × ITB matrix runner. 24 cells
+--  (8 examples × 3 outer ciphers); exits 0 on full pass, non-zero on
+--  any failed cell.
+--
+--  Run with::
+--
+--      alr exec -- gprbuild -P itb_eitb.gpr
+--      ./eitb/eitb               # full matrix
+--      ./eitb/eitb --cipher aes  # filter to one cipher
+--      ./eitb/eitb -v            # print fingerprint diagnostics
+
+with "itb";
+
+project Itb_Eitb is
+
+   for Source_Dirs use ("eitb");
+   for Object_Dir use "eitb/obj";
+   for Exec_Dir use "eitb";
+   for Main use ("eitb.adb");
+
+   package Compiler renames Itb.Compiler;
+   package Linker renames Itb.Linker;
+
+   package Builder is
+      for Default_Switches ("Ada") use ("-j0");
+   end Builder;
+
+end Itb_Eitb;

@@ -161,30 +161,78 @@ runtime `dlopen`-style probe is performed at startup.
 ```ada
 with Ada.Streams;            use Ada.Streams;
 with Ada.Streams.Stream_IO;
+with Itb;
 with Itb.Encryptor;
+with Itb.Wrapper;
 
 declare
-   Enc       : Itb.Encryptor.Encryptor :=
+   Enc        : Itb.Encryptor.Encryptor :=
      Itb.Encryptor.Make ("areion512", 1024, "hmac-blake3", 1);
-   Plain_F   : Ada.Streams.Stream_IO.File_Type;
-   Cipher_F  : Ada.Streams.Stream_IO.File_Type;
+   --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB inner PRF + seeds keep CSPRNG-fresh randomness per call.
+   Outer_Key  : constant Itb.Byte_Array :=
+     Itb.Wrapper.Generate_Key (Itb.Wrapper.Aes_128_Ctr);
+   N_Len      : constant Stream_Element_Offset :=
+     Stream_Element_Offset
+       (Itb.Wrapper.Nonce_Size (Itb.Wrapper.Aes_128_Ctr));
+   Plain_F    : Ada.Streams.Stream_IO.File_Type;
+   Inner_F    : Ada.Streams.Stream_IO.File_Type;
+   Cipher_F   : Ada.Streams.Stream_IO.File_Type;
 begin
+   --  Stage 1: encrypt plaintext into a buffered inner-transcript file.
    Ada.Streams.Stream_IO.Open
      (Plain_F, Ada.Streams.Stream_IO.In_File, "/tmp/64mb.src");
    Ada.Streams.Stream_IO.Create
-     (Cipher_F, Ada.Streams.Stream_IO.Out_File, "/tmp/64mb.enc");
+     (Inner_F, Ada.Streams.Stream_IO.Out_File, "/tmp/64mb.inner");
    Itb.Encryptor.Encrypt_Stream_Auth
      (Enc,
       Ada.Streams.Stream_IO.Stream (Plain_F),
-      Ada.Streams.Stream_IO.Stream (Cipher_F),
+      Ada.Streams.Stream_IO.Stream (Inner_F),
       Stream_Element_Offset (16 * 1024 * 1024));
    Ada.Streams.Stream_IO.Close (Plain_F);
+   Ada.Streams.Stream_IO.Close (Inner_F);
+
+   --  Stage 2: pump the inner ITB transcript through one wrap-stream
+   --  session so the on-wire bytes carry no ITB framing.
+   Ada.Streams.Stream_IO.Open
+     (Inner_F, Ada.Streams.Stream_IO.In_File, "/tmp/64mb.inner");
+   Ada.Streams.Stream_IO.Create
+     (Cipher_F, Ada.Streams.Stream_IO.Out_File, "/tmp/64mb.enc");
+   declare
+      --  Format-deniability ITB masking via outer-cipher streaming wrapper (AES-128-CTR) - same ~0% overhead in stream mode (Recommended in every case).
+      W         : Itb.Wrapper.Wrap_Stream_Writer;
+      Out_Nonce : Itb.Byte_Array (1 .. N_Len);
+      Buf       : Itb.Byte_Array (1 .. 1 * 1024 * 1024);
+      Last      : Stream_Element_Offset;
+      Cipher_S  : constant access Ada.Streams.Root_Stream_Type'Class :=
+        Ada.Streams.Stream_IO.Stream (Cipher_F);
+   begin
+      Itb.Wrapper.Initialize
+        (W, Itb.Wrapper.Aes_128_Ctr, Outer_Key, Out_Nonce);
+      Ada.Streams.Root_Stream_Type'Class (Cipher_S.all).Write (Out_Nonce);
+      loop
+         Ada.Streams.Stream_IO.Read
+           (Inner_F, Buf, Last);
+         exit when Last < Buf'First;
+         declare
+            Encoded : Itb.Byte_Array (Buf'First .. Last);
+            Out_Last : Stream_Element_Offset;
+         begin
+            Itb.Wrapper.Update
+              (W, Buf (Buf'First .. Last), Encoded, Out_Last);
+            Ada.Streams.Root_Stream_Type'Class (Cipher_S.all).Write
+              (Encoded);
+         end;
+         exit when Last < Buf'Last;
+      end loop;
+      Itb.Wrapper.Close (W);
+   end;
+   Ada.Streams.Stream_IO.Close (Inner_F);
    Ada.Streams.Stream_IO.Close (Cipher_F);
    Itb.Encryptor.Close (Enc);
 end;
 ```
 
-**Recommended idiom for single-shot non-streaming calls.** When a single-shot `Itb.Encryptor.Encrypt` / `Decrypt` (or `Encrypt_Auth` / `Decrypt_Auth`) is invoked on plaintext approaching or exceeding ~8 MiB, the function-result `Byte_Array` lands on the calling task's stack by default, which can overflow the standard 8 MiB main-thread stack. The Build-In-Place (BIP) idiom routes the result onto the heap instead:
+**Recommended idiom for Single Message non-streaming calls.** When a Single Message `Itb.Encryptor.Encrypt` / `Decrypt` (or `Encrypt_Auth` / `Decrypt_Auth`) is invoked on plaintext approaching or exceeding ~8 MiB, the function-result `Byte_Array` lands on the calling task's stack by default, which can overflow the standard 8 MiB main-thread stack. The Build-In-Place (BIP) idiom routes the result onto the heap instead:
 
 ```ada
 declare
@@ -245,19 +293,64 @@ declare
    Start : constant Itb.Seed.Seed := Itb.Seed.Make ("areion512", 1024);
    Mac   : constant Itb.MAC.MAC :=
      Itb.MAC.Make ("hmac-blake3", Random_MAC_Key);
+   --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB inner PRF + seeds keep CSPRNG-fresh randomness per call.
+   Outer_Key : constant Itb.Byte_Array :=
+     Itb.Wrapper.Generate_Key (Itb.Wrapper.Aes_128_Ctr);
+   N_Len     : constant Stream_Element_Offset :=
+     Stream_Element_Offset
+       (Itb.Wrapper.Nonce_Size (Itb.Wrapper.Aes_128_Ctr));
    Plain_F  : Ada.Streams.Stream_IO.File_Type;
+   Inner_F  : Ada.Streams.Stream_IO.File_Type;
    Cipher_F : Ada.Streams.Stream_IO.File_Type;
 begin
+   --  Stage 1: encrypt plaintext into a buffered inner-transcript file.
    Ada.Streams.Stream_IO.Open
      (Plain_F,  Ada.Streams.Stream_IO.In_File,  "/tmp/64mb.src");
    Ada.Streams.Stream_IO.Create
-     (Cipher_F, Ada.Streams.Stream_IO.Out_File, "/tmp/64mb.enc");
+     (Inner_F,  Ada.Streams.Stream_IO.Out_File, "/tmp/64mb.inner");
    Itb.Streams.Encrypt_Stream_Auth
      (Noise, Data, Start, Mac,
       Ada.Streams.Stream_IO.Stream (Plain_F),
-      Ada.Streams.Stream_IO.Stream (Cipher_F),
+      Ada.Streams.Stream_IO.Stream (Inner_F),
       Stream_Element_Offset (16 * 1024 * 1024));
    Ada.Streams.Stream_IO.Close (Plain_F);
+   Ada.Streams.Stream_IO.Close (Inner_F);
+
+   --  Stage 2: pump the inner ITB transcript through one wrap-stream
+   --  session so the on-wire bytes carry no ITB framing.
+   Ada.Streams.Stream_IO.Open
+     (Inner_F, Ada.Streams.Stream_IO.In_File, "/tmp/64mb.inner");
+   Ada.Streams.Stream_IO.Create
+     (Cipher_F, Ada.Streams.Stream_IO.Out_File, "/tmp/64mb.enc");
+   declare
+      --  Format-deniability ITB masking via outer-cipher streaming wrapper (AES-128-CTR) - same ~0% overhead in stream mode (Recommended in every case).
+      W         : Itb.Wrapper.Wrap_Stream_Writer;
+      Out_Nonce : Itb.Byte_Array (1 .. N_Len);
+      Buf       : Itb.Byte_Array (1 .. 1 * 1024 * 1024);
+      Last      : Stream_Element_Offset;
+      Cipher_S  : constant access Ada.Streams.Root_Stream_Type'Class :=
+        Ada.Streams.Stream_IO.Stream (Cipher_F);
+   begin
+      Itb.Wrapper.Initialize
+        (W, Itb.Wrapper.Aes_128_Ctr, Outer_Key, Out_Nonce);
+      Ada.Streams.Root_Stream_Type'Class (Cipher_S.all).Write (Out_Nonce);
+      loop
+         Ada.Streams.Stream_IO.Read (Inner_F, Buf, Last);
+         exit when Last < Buf'First;
+         declare
+            Encoded  : Itb.Byte_Array (Buf'First .. Last);
+            Out_Last : Stream_Element_Offset;
+         begin
+            Itb.Wrapper.Update
+              (W, Buf (Buf'First .. Last), Encoded, Out_Last);
+            Ada.Streams.Root_Stream_Type'Class (Cipher_S.all).Write
+              (Encoded);
+         end;
+         exit when Last < Buf'Last;
+      end loop;
+      Itb.Wrapper.Close (W);
+   end;
+   Ada.Streams.Stream_IO.Close (Inner_F);
    Ada.Streams.Stream_IO.Close (Cipher_F);
 end;
 ```
@@ -316,6 +409,7 @@ with Ada.Text_IO;
 with Itb;
 with Itb.Encryptor;
 with Itb.Errors;
+with Itb.Wrapper;
 
 procedure Sender is
 
@@ -334,6 +428,10 @@ procedure Sender is
 
    Plaintext : constant Itb.Byte_Array :=
      To_Bytes ("any text or binary data - including 0x00 bytes");
+
+   --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB inner PRF + seeds keep CSPRNG-fresh randomness per call.
+   Outer_Key : constant Itb.Byte_Array :=
+     Itb.Wrapper.Generate_Key (Itb.Wrapper.Aes_128_Ctr);
 
 begin
    --  Per-instance configuration — mutates only this encryptor's
@@ -386,12 +484,28 @@ begin
          --  the entire decrypted capacity and embedded inside the
          --  RGBWYOPA container, preserving oracle-free deniability.
          declare
-            Encrypted : constant Itb.Byte_Array :=
+            Encrypted : Itb.Byte_Array :=
               Itb.Encryptor.Encrypt_Auth (Enc, Plaintext);
+            N_Len     : constant Stream_Element_Offset :=
+              Stream_Element_Offset
+                (Itb.Wrapper.Nonce_Size (Itb.Wrapper.Aes_128_Ctr));
+            Out_Nonce : Itb.Byte_Array (1 .. N_Len);
          begin
             Ada.Text_IO.Put_Line
               ("encrypted:" & Stream_Element_Offset'Image (Encrypted'Length) & " bytes");
-            --  Send Encrypted payload + Blob to the receiver.
+
+            --  Format-deniability ITB masking through outer cipher AES-128-CTR with ~0% overhead over ITB Encrypt / Decrypt (Recommended in every case).
+            Itb.Wrapper.Wrap_In_Place
+              (Itb.Wrapper.Aes_128_Ctr, Outer_Key, Encrypted, Out_Nonce);
+            declare
+               Wire : Itb.Byte_Array (1 .. N_Len + Encrypted'Length);
+            begin
+               Wire (1 .. N_Len) := Out_Nonce;
+               Wire (N_Len + 1 .. Wire'Last) := Encrypted;
+               Ada.Text_IO.Put_Line
+                 ("wire:" & Stream_Element_Offset'Image (Wire'Length) & " bytes");
+               --  Send Wire payload + Blob to the receiver.
+            end;
          end;
       end;
    end;  --  Enc.Finalize fires here, libitb handle released, key
@@ -410,10 +524,12 @@ with Itb;
 with Itb.Encryptor;
 with Itb.Errors;
 with Itb.Status;
+with Itb.Wrapper;
 
 procedure Receiver is
-   Encrypted : Itb.Byte_Array := ...;   --  received from the sender
+   Wire      : Itb.Byte_Array := ...;   --  received from the sender
    Blob      : Itb.Byte_Array := ...;   --  received from the sender
+   Outer_Key : Itb.Byte_Array := ...;   --  agreed out-of-band with the sender
 begin
    Itb.Set_Max_Workers (8);   --  limit to 8 CPU cores (default: 0 = all CPUs)
 
@@ -450,13 +566,27 @@ begin
       --  per-instance configuration overrides from the saved blob.
       Itb.Encryptor.Import_State (Dec, Blob);
 
+      --  Strip the per-stream nonce, recover the inner ITB
+      --  ciphertext.
+      declare
+         Body_First : Stream_Element_Offset;
+      begin
+         Itb.Wrapper.Unwrap_In_Place
+           (Itb.Wrapper.Aes_128_Ctr, Outer_Key, Wire, Body_First);
+      end;
+
       --  Authenticated decrypt - any single-bit tamper triggers
       --  MAC failure (no oracle leak about which byte was tampered).
       --  Mismatch surfaces as Itb_Error with Status_Code =
       --  MAC_Failure, not a corrupted plaintext.
       declare
          Plaintext : constant Itb.Byte_Array :=
-           Itb.Encryptor.Decrypt_Auth (Dec, Encrypted);
+           Itb.Encryptor.Decrypt_Auth
+             (Dec,
+              Wire (Wire'First +
+                    Stream_Element_Offset
+                      (Itb.Wrapper.Nonce_Size (Itb.Wrapper.Aes_128_Ctr))
+                    .. Wire'Last));
       begin
          Ada.Text_IO.Put_Line
            ("decrypted:" & Stream_Element_Offset'Image (Plaintext'Length) & " bytes");
@@ -492,9 +622,13 @@ with Ada.Text_IO;
 
 with Itb;
 with Itb.Encryptor;
+with Itb.Wrapper;
 
 procedure Mixed_Sender is
    Plaintext : constant Itb.Byte_Array := ...;   --  payload bytes
+   --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB inner PRF + seeds keep CSPRNG-fresh randomness per call.
+   Outer_Key : constant Itb.Byte_Array :=
+     Itb.Wrapper.Generate_Key (Itb.Wrapper.Aes_128_Ctr);
 begin
    --  Per-slot primitive selection (Single Ouroboros, 3 + 1 slots).
    --  Every name must share the same native hash width - mixing
@@ -541,10 +675,23 @@ begin
       declare
          Blob      : constant Itb.Byte_Array :=
            Itb.Encryptor.Export_State (Enc);
-         Encrypted : constant Itb.Byte_Array :=
+         Encrypted : Itb.Byte_Array :=
            Itb.Encryptor.Encrypt_Auth (Enc, Plaintext);
+         N_Len     : constant Stream_Element_Offset :=
+           Stream_Element_Offset
+             (Itb.Wrapper.Nonce_Size (Itb.Wrapper.Aes_128_Ctr));
+         Out_Nonce : Itb.Byte_Array (1 .. N_Len);
       begin
-         null;  --  Send Encrypted payload + Blob to the receiver.
+         --  Format-deniability ITB masking through outer cipher AES-128-CTR with ~0% overhead over ITB Encrypt / Decrypt (Recommended in every case).
+         Itb.Wrapper.Wrap_In_Place
+           (Itb.Wrapper.Aes_128_Ctr, Outer_Key, Encrypted, Out_Nonce);
+         declare
+            Wire : Itb.Byte_Array (1 .. N_Len + Encrypted'Length);
+         begin
+            Wire (1 .. N_Len) := Out_Nonce;
+            Wire (N_Len + 1 .. Wire'Last) := Encrypted;
+            null;  --  Send Wire payload + Blob to the receiver.
+         end;
       end;
    end;  --  Enc.Finalize fires here.
 end Mixed_Sender;
@@ -567,6 +714,7 @@ when `Mode => 3` is passed to the constructor.
 ```ada
 with Itb;
 with Itb.Encryptor;
+with Itb.Wrapper;
 
 procedure Triple_Demo is
    Plaintext : constant Itb.Byte_Array := ...;   --  payload bytes
@@ -581,12 +729,39 @@ procedure Triple_Demo is
         Mac_Name  => "hmac-blake3",
         Mode      => 3);
 
-   Encrypted : constant Itb.Byte_Array :=
+   --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB inner PRF + seeds keep CSPRNG-fresh randomness per call.
+   Outer_Key : constant Itb.Byte_Array :=
+     Itb.Wrapper.Generate_Key (Itb.Wrapper.Aes_128_Ctr);
+
+   Encrypted : Itb.Byte_Array :=
      Itb.Encryptor.Encrypt_Auth (Enc, Plaintext);
-   Decrypted : constant Itb.Byte_Array :=
-     Itb.Encryptor.Decrypt_Auth (Enc, Encrypted);
+   N_Len     : constant Stream_Element_Offset :=
+     Stream_Element_Offset
+       (Itb.Wrapper.Nonce_Size (Itb.Wrapper.Aes_128_Ctr));
+   Out_Nonce : Itb.Byte_Array (1 .. N_Len);
 begin
-   pragma Assert (Decrypted = Plaintext);
+   --  Format-deniability ITB masking through outer cipher AES-128-CTR with ~0% overhead over ITB Encrypt / Decrypt (Recommended in every case).
+   Itb.Wrapper.Wrap_In_Place
+     (Itb.Wrapper.Aes_128_Ctr, Outer_Key, Encrypted, Out_Nonce);
+   declare
+      Wire       : Itb.Byte_Array (1 .. N_Len + Encrypted'Length);
+      Body_First : Stream_Element_Offset;
+   begin
+      Wire (1 .. N_Len) := Out_Nonce;
+      Wire (N_Len + 1 .. Wire'Last) := Encrypted;
+
+      --  Receiver mirror — strip the per-stream nonce, recover the
+      --  inner ITB ciphertext, decrypt.
+      Itb.Wrapper.Unwrap_In_Place
+        (Itb.Wrapper.Aes_128_Ctr, Outer_Key, Wire, Body_First);
+      declare
+         Decrypted : constant Itb.Byte_Array :=
+           Itb.Encryptor.Decrypt_Auth
+             (Enc, Wire (Body_First .. Wire'Last));
+      begin
+         pragma Assert (Decrypted = Plaintext);
+      end;
+   end;
 end Triple_Demo;
 ```
 
@@ -617,6 +792,7 @@ with Itb.Blob;
 with Itb.Cipher;
 with Itb.MAC;
 with Itb.Seed;
+with Itb.Wrapper;
 
 procedure Lowlevel_Sender is
    use type Itb.Blob.Export_Opts;
@@ -625,6 +801,9 @@ procedure Lowlevel_Sender is
    Mac_Key   : constant Itb.Byte_Array (1 .. 32) := [others => 0];
    --  Real code should pull Mac_Key from a CSPRNG; the zero key here
    --  is for example purposes only.
+   --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB inner PRF + seeds keep CSPRNG-fresh randomness per call.
+   Outer_Key : constant Itb.Byte_Array :=
+     Itb.Wrapper.Generate_Key (Itb.Wrapper.Aes_128_Ctr);
 begin
    --  Optional: global configuration (all process-wide, atomic).
    Itb.Set_Max_Workers   (8);   --  limit to 8 CPU cores (default: 0 = all CPUs)
@@ -669,11 +848,27 @@ begin
       --  entire decrypted capacity and embedded inside the RGBWYOPA
       --  container, preserving oracle-free deniability.
       declare
-         Encrypted : constant Itb.Byte_Array :=
+         Encrypted : Itb.Byte_Array :=
            Itb.Cipher.Encrypt_Auth (Ns, Ds, Ss, M, Plaintext);
+         N_Len     : constant Stream_Element_Offset :=
+           Stream_Element_Offset
+             (Itb.Wrapper.Nonce_Size (Itb.Wrapper.Aes_128_Ctr));
+         Out_Nonce : Itb.Byte_Array (1 .. N_Len);
       begin
          Ada.Text_IO.Put_Line
            ("encrypted:" & Stream_Element_Offset'Image (Encrypted'Length) & " bytes");
+
+         --  Format-deniability ITB masking through outer cipher AES-128-CTR with ~0% overhead over ITB Encrypt / Decrypt (Recommended in every case).
+         Itb.Wrapper.Wrap_In_Place
+           (Itb.Wrapper.Aes_128_Ctr, Outer_Key, Encrypted, Out_Nonce);
+         declare
+            Wire : Itb.Byte_Array (1 .. N_Len + Encrypted'Length);
+         begin
+            Wire (1 .. N_Len) := Out_Nonce;
+            Wire (N_Len + 1 .. Wire'Last) := Encrypted;
+            Ada.Text_IO.Put_Line
+              ("wire:" & Stream_Element_Offset'Image (Wire'Length) & " bytes");
+         end;
 
          --  Cross-process persistence: Itb.Blob.Blob512 packs every
          --  seed's hash key + components, the optional dedicated
@@ -729,7 +924,7 @@ Ds, Ss, M, Encrypted)`.
 
 `Itb.Streams.Stream_Encryptor` / `Stream_Decryptor` (and the
 seven-seed counterparts `Stream_Encryptor_Triple` /
-`Stream_Decryptor_Triple`) wrap the one-shot encrypt / decrypt API
+`Stream_Decryptor_Triple`) wrap the Single Message Encrypt / Decrypt API
 behind a `Write_Plaintext` / `Read_Plaintext`-driven chunked I/O
 surface. ITB ciphertexts cap at ~64 MB plaintext per chunk;
 streaming larger payloads slices the input into chunks at the
@@ -769,35 +964,80 @@ with Ada.Streams.Stream_IO;
 with Itb;
 with Itb.Seed;
 with Itb.Streams;
+with Itb.Wrapper;
 
 procedure Stream_Demo is
    N : constant Itb.Seed.Seed := Itb.Seed.Make ("blake3", 1024);
    D : constant Itb.Seed.Seed := Itb.Seed.Make ("blake3", 1024);
    S : constant Itb.Seed.Seed := Itb.Seed.Make ("blake3", 1024);
 
-   Sink_File : aliased Ada.Streams.Stream_IO.File_Type;
+   --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB inner PRF + seeds keep CSPRNG-fresh randomness per call.
+   Outer_Key : constant Itb.Byte_Array :=
+     Itb.Wrapper.Generate_Key (Itb.Wrapper.Aes_128_Ctr);
+   N_Len : constant Stream_Element_Offset :=
+     Stream_Element_Offset
+       (Itb.Wrapper.Nonce_Size (Itb.Wrapper.Aes_128_Ctr));
+
+   Inner_File : aliased Ada.Streams.Stream_IO.File_Type;
+   Sink_File  : aliased Ada.Streams.Stream_IO.File_Type;
 begin
-   --  Encrypt: open a sink file, attach a Stream_Encryptor over
-   --  its stream, push plaintext through Write_Plaintext, then
+   --  Stage 1: open an inner-transcript sink file, attach a
+   --  Stream_Encryptor, push plaintext through Write_Plaintext,
    --  Finish to flush the trailing partial chunk.
    Ada.Streams.Stream_IO.Create
-     (Sink_File, Ada.Streams.Stream_IO.Out_File, "ciphertext.bin");
+     (Inner_File, Ada.Streams.Stream_IO.Out_File, "ciphertext.inner");
    declare
-      Sink : constant access Ada.Streams.Root_Stream_Type'Class :=
-        Ada.Streams.Stream_IO.Stream (Sink_File);
+      Inner : constant access Ada.Streams.Root_Stream_Type'Class :=
+        Ada.Streams.Stream_IO.Stream (Inner_File);
 
       Enc : Itb.Streams.Stream_Encryptor :=
         Itb.Streams.Make
           (Noise      => N,
            Data       => D,
            Start      => S,
-           Sink       => Sink,
+           Sink       => Inner,
            Chunk_Size => 1 * 1024 * 1024);   --  1 MiB chunks
    begin
       Itb.Streams.Write_Plaintext (Enc, Plaintext_Chunk_1);
       Itb.Streams.Write_Plaintext (Enc, Plaintext_Chunk_2);
       Itb.Streams.Finish (Enc);
    end;  --  Enc.Finalize fires here; final chunk already flushed.
+   Ada.Streams.Stream_IO.Close (Inner_File);
+
+   --  Stage 2: pump the inner ITB transcript through one wrap-stream
+   --  session so the on-wire bytes carry no ITB framing.
+   Ada.Streams.Stream_IO.Open
+     (Inner_File, Ada.Streams.Stream_IO.In_File, "ciphertext.inner");
+   Ada.Streams.Stream_IO.Create
+     (Sink_File, Ada.Streams.Stream_IO.Out_File, "ciphertext.bin");
+   declare
+      --  Format-deniability ITB masking via outer-cipher streaming wrapper (AES-128-CTR) - same ~0% overhead in stream mode (Recommended in every case).
+      W         : Itb.Wrapper.Wrap_Stream_Writer;
+      Out_Nonce : Itb.Byte_Array (1 .. N_Len);
+      Buf       : Itb.Byte_Array (1 .. 1 * 1024 * 1024);
+      Last      : Stream_Element_Offset;
+      Sink      : constant access Ada.Streams.Root_Stream_Type'Class :=
+        Ada.Streams.Stream_IO.Stream (Sink_File);
+   begin
+      Itb.Wrapper.Initialize
+        (W, Itb.Wrapper.Aes_128_Ctr, Outer_Key, Out_Nonce);
+      Ada.Streams.Root_Stream_Type'Class (Sink.all).Write (Out_Nonce);
+      loop
+         Ada.Streams.Stream_IO.Read (Inner_File, Buf, Last);
+         exit when Last < Buf'First;
+         declare
+            Encoded  : Itb.Byte_Array (Buf'First .. Last);
+            Out_Last : Stream_Element_Offset;
+         begin
+            Itb.Wrapper.Update
+              (W, Buf (Buf'First .. Last), Encoded, Out_Last);
+            Ada.Streams.Root_Stream_Type'Class (Sink.all).Write (Encoded);
+         end;
+         exit when Last < Buf'Last;
+      end loop;
+      Itb.Wrapper.Close (W);
+   end;
+   Ada.Streams.Stream_IO.Close (Inner_File);
    Ada.Streams.Stream_IO.Close (Sink_File);
 end Stream_Demo;
 ```

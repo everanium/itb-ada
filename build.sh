@@ -38,7 +38,7 @@ REPO_ROOT="$(cd ../.. && pwd)"
 # thread stack at plaintext sizes ≥ ~8 MiB.
 #
 # Uncomment the line below to bump the executable's stack reservation
-# to 64 MiB (sufficient for the largest sane single-shot payload).
+# to 64 MiB (sufficient for the largest sane Single Message payload).
 # Production code is encouraged to use the streaming entry points
 # (Encrypt_Stream / Decrypt_Stream / Encrypt_Stream_Auth /
 # Decrypt_Stream_Auth) which heap-allocate their per-chunk staging

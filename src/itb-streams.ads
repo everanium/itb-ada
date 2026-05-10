@@ -1,4 +1,4 @@
---  Itb.Streams — file-like streaming wrappers over the one-shot
+--  Itb.Streams — file-like streaming wrappers over the Single Message
 --  Itb.Cipher Encrypt / Decrypt entry points.
 --
 --  ITB ciphertexts cap at ~64 MB plaintext per chunk (the underlying
