@@ -253,7 +253,7 @@ begin
    Ada.Streams.Stream_IO.Create
      (Cipher_F, Ada.Streams.Stream_IO.Out_File, "/tmp/64mb.enc");
    declare
-      --  Format-deniability ITB masking via outer-cipher streaming wrapper (AES-128-CTR) - same ~0% overhead in stream mode (Recommended in every case).
+      --  Format-deniability ITB masking via outer-cipher wrapper (AES-128-CTR) ~0% overhead (Recommended in every case).
       W         : Itb.Wrapper.Wrap_Stream_Writer;
       Out_Nonce : Itb.Byte_Array (1 .. N_Len);
       Buf       : Itb.Byte_Array (1 .. 1 * 1024 * 1024);
@@ -378,7 +378,7 @@ begin
    Ada.Streams.Stream_IO.Create
      (Cipher_F, Ada.Streams.Stream_IO.Out_File, "/tmp/64mb.enc");
    declare
-      --  Format-deniability ITB masking via outer-cipher streaming wrapper (AES-128-CTR) - same ~0% overhead in stream mode (Recommended in every case).
+      --  Format-deniability ITB masking via outer-cipher wrapper (AES-128-CTR) ~0% overhead (Recommended in every case).
       W         : Itb.Wrapper.Wrap_Stream_Writer;
       Out_Nonce : Itb.Byte_Array (1 .. N_Len);
       Buf       : Itb.Byte_Array (1 .. 1 * 1024 * 1024);
@@ -549,7 +549,7 @@ begin
             Ada.Text_IO.Put_Line
               ("encrypted:" & Stream_Element_Offset'Image (Encrypted'Length) & " bytes");
 
-            --  Format-deniability ITB masking through outer cipher AES-128-CTR with ~0% overhead over ITB Encrypt / Decrypt (Recommended in every case).
+            --  Format-deniability ITB masking via outer-cipher wrapper (AES-128-CTR) ~0% overhead (Recommended in every case).
             Itb.Wrapper.Wrap_In_Place
               (Itb.Wrapper.Aes_128_Ctr, Outer_Key, Encrypted, Out_Nonce);
             declare
@@ -737,7 +737,7 @@ begin
              (Itb.Wrapper.Nonce_Size (Itb.Wrapper.Aes_128_Ctr));
          Out_Nonce : Itb.Byte_Array (1 .. N_Len);
       begin
-         --  Format-deniability ITB masking through outer cipher AES-128-CTR with ~0% overhead over ITB Encrypt / Decrypt (Recommended in every case).
+         --  Format-deniability ITB masking via outer-cipher wrapper (AES-128-CTR) ~0% overhead (Recommended in every case).
          Itb.Wrapper.Wrap_In_Place
            (Itb.Wrapper.Aes_128_Ctr, Outer_Key, Encrypted, Out_Nonce);
          declare
@@ -795,7 +795,7 @@ procedure Triple_Demo is
        (Itb.Wrapper.Nonce_Size (Itb.Wrapper.Aes_128_Ctr));
    Out_Nonce : Itb.Byte_Array (1 .. N_Len);
 begin
-   --  Format-deniability ITB masking through outer cipher AES-128-CTR with ~0% overhead over ITB Encrypt / Decrypt (Recommended in every case).
+   --  Format-deniability ITB masking via outer-cipher wrapper (AES-128-CTR) ~0% overhead (Recommended in every case).
    Itb.Wrapper.Wrap_In_Place
      (Itb.Wrapper.Aes_128_Ctr, Outer_Key, Encrypted, Out_Nonce);
    declare
@@ -913,7 +913,7 @@ begin
          Ada.Text_IO.Put_Line
            ("encrypted:" & Stream_Element_Offset'Image (Encrypted'Length) & " bytes");
 
-         --  Format-deniability ITB masking through outer cipher AES-128-CTR with ~0% overhead over ITB Encrypt / Decrypt (Recommended in every case).
+         --  Format-deniability ITB masking via outer-cipher wrapper (AES-128-CTR) ~0% overhead (Recommended in every case).
          Itb.Wrapper.Wrap_In_Place
            (Itb.Wrapper.Aes_128_Ctr, Outer_Key, Encrypted, Out_Nonce);
          declare
@@ -1066,7 +1066,7 @@ begin
    Ada.Streams.Stream_IO.Create
      (Sink_File, Ada.Streams.Stream_IO.Out_File, "ciphertext.bin");
    declare
-      --  Format-deniability ITB masking via outer-cipher streaming wrapper (AES-128-CTR) - same ~0% overhead in stream mode (Recommended in every case).
+      --  Format-deniability ITB masking via outer-cipher wrapper (AES-128-CTR) ~0% overhead (Recommended in every case).
       W         : Itb.Wrapper.Wrap_Stream_Writer;
       Out_Nonce : Itb.Byte_Array (1 .. N_Len);
       Buf       : Itb.Byte_Array (1 .. 1 * 1024 * 1024);
