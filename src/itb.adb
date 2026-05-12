@@ -1,6 +1,5 @@
 --  Itb body — implementations of the library-wide free subprograms.
 
-with Interfaces.C;
 with System;
 
 with Itb.Errors;
@@ -285,5 +284,16 @@ package body Itb is
    begin
       return Integer (Itb.Sys.ITB_GetBarrierFill);
    end Get_Barrier_Fill;
+
+   function Set_Memory_Limit
+     (Limit : Interfaces.Integer_64) return Interfaces.Integer_64 is
+   begin
+      return Itb.Sys.ITB_SetMemoryLimit (Limit);
+   end Set_Memory_Limit;
+
+   function Set_GC_Percent (Pct : Interfaces.C.int) return Interfaces.C.int is
+   begin
+      return Itb.Sys.ITB_SetGCPercent (Pct);
+   end Set_GC_Percent;
 
 end Itb;

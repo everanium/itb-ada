@@ -37,6 +37,7 @@
 with Ada.Streams;
 with Ada.Strings.Unbounded;
 with Interfaces;
+with Interfaces.C;
 
 package Itb is
    pragma Preelaborate;
@@ -173,5 +174,19 @@ package Itb is
    --  with Status_Code = Bad_Input.
    procedure Set_Barrier_Fill (N : Integer);
    function  Get_Barrier_Fill return Integer;
+
+   --  Configures the Go runtime's heap-size soft limit (bytes). Pass -1
+   --  (or any negative value) to query the current limit without changing
+   --  it; the previous limit is returned. Setter calls override any
+   --  ITB_GOMEMLIMIT env var set at libitb load time.
+   function Set_Memory_Limit
+     (Limit : Interfaces.Integer_64) return Interfaces.Integer_64;
+
+   --  Configures the Go runtime's GC trigger percentage. The default is
+   --  100 (GC fires at +100% heap growth); lower values trigger GC more
+   --  aggressively. Pass -1 (or any negative value) to query the current
+   --  value without changing it; the previous value is returned. Setter
+   --  calls override any ITB_GOGC env var set at libitb load time.
+   function Set_GC_Percent (Pct : Interfaces.C.int) return Interfaces.C.int;
 
 end Itb;

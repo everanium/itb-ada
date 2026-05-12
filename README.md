@@ -109,7 +109,38 @@ Crate metadata: `name = "itb"`, `version = "0.1.0-dev"`,
 plus the standard library, with the libitb shared library located
 through compile-time linker search paths and runtime rpath.
 
-## Run the integration test suite
+## Library lookup order
+
+1. **Compile-time `-L` switch** in `itb.gpr`'s `Linker` package
+   resolves `-litb` against `<repo>/dist/<os>-<arch>/`. The
+   `ITB_DIST_DIR` external variable overrides the search prefix
+   (`alr exec -- gprbuild -P itb.gpr -XITB_DIST_DIR=/abs/path`).
+2. **Runtime `-Wl,-rpath,$ORIGIN/../../../dist/linux-amd64`** is
+   baked into the resulting binary. `ld.so` searches the binary's
+   RPATH first (resolving `$ORIGIN` to the binary's own directory),
+   then the standard system loader path.
+3. **System loader path** (`ld.so.cache`, `LD_LIBRARY_PATH`,
+   `DYLD_LIBRARY_PATH`, `PATH`). Setting `LD_LIBRARY_PATH` to an
+   absolute path overrides RPATH for diagnostic / installation use.
+
+The link-time + rpath mechanism is the standard Ada idiom — no
+runtime `dlopen`-style probe is performed at startup.
+
+## Memory
+
+Two process-wide knobs constrain Go runtime arena pacing. Both readable at libitb load time via env vars:
+
+- `ITB_GOMEMLIMIT=512MiB` — soft memory limit in bytes; supports `B` / `KiB` / `MiB` / `GiB` / `TiB` suffixes.
+- `ITB_GOGC=20` — GC trigger percentage; default `100`, lower triggers GC more aggressively.
+
+Programmatic setters override env-set values at any time. Pass `-1` to either setter to query the current value without changing it.
+
+```ada
+Discard := Itb.Set_Memory_Limit (512 * 1024 * 1024);
+Discard := Itb.Set_GC_Percent (20);
+```
+
+## Tests
 
 ```bash
 ./bindings/ada/build.sh -- -P itb_tests.gpr
@@ -133,22 +164,46 @@ without a shared mutex.
 `./run_tests.sh test_blake3` runs a single test by base name; the
 default invocation iterates every test executable in `obj-tests/`.
 
-## Library lookup order
+## Benchmarks
 
-1. **Compile-time `-L` switch** in `itb.gpr`'s `Linker` package
-   resolves `-litb` against `<repo>/dist/<os>-<arch>/`. The
-   `ITB_DIST_DIR` external variable overrides the search prefix
-   (`alr exec -- gprbuild -P itb.gpr -XITB_DIST_DIR=/abs/path`).
-2. **Runtime `-Wl,-rpath,$ORIGIN/../../../dist/linux-amd64`** is
-   baked into the resulting binary. `ld.so` searches the binary's
-   RPATH first (resolving `$ORIGIN` to the binary's own directory),
-   then the standard system loader path.
-3. **System loader path** (`ld.so.cache`, `LD_LIBRARY_PATH`,
-   `DYLD_LIBRARY_PATH`, `PATH`). Setting `LD_LIBRARY_PATH` to an
-   absolute path overrides RPATH for diagnostic / installation use.
+A custom Go-bench-style harness lives under `bench/` and covers the
+four ops (`Encrypt`, `Decrypt`, `Encrypt_Auth`, `Decrypt_Auth`)
+across the nine PRF-grade primitives plus one mixed-primitive
+variant for both Single and Triple Ouroboros at 1024-bit ITB key
+width and 16 MiB payload. See [`bench/README.md`](bench/README.md)
+for invocation / environment variables / output format and
+[`bench/BENCH.md`](bench/BENCH.md) for recorded throughput results
+across the canonical pass matrix.
 
-The link-time + rpath mechanism is the standard Ada idiom — no
-runtime `dlopen`-style probe is performed at startup.
+The four-pass canonical sweep (Single + Triple × ±LockSeed) that
+fills `bench/BENCH.md` is driven by the wrapper script in the
+binding root:
+
+```bash
+./bindings/ada/run_bench.sh                  # full 4-pass canonical sweep
+./bindings/ada/run_bench.sh --lockseed-only  # pass 3 + pass 4 only
+```
+
+The harness sets `LD_LIBRARY_PATH` to `dist/linux-amd64/`,
+manages `ITB_LOCKSEED` per pass, and forwards `ITB_NONCE_BITS` /
+`ITB_BENCH_FILTER` / `ITB_BENCH_MIN_SEC` straight through to the
+underlying `obj-bench/bench_single` / `obj-bench/bench_triple`
+binaries (built ahead of time via
+`./bindings/ada/build.sh -- -P itb_bench.gpr`).
+
+FFI overhead in the Ada binding is link-time: `pragma Import (C, ...,
+External_Name => "ITB_*")` bakes the C symbol reference into the
+compiled Ada object at compile time, and `ld.so` resolves the symbol
+against the loaded `libitb.so` at process start. Per-call cost is
+one C ABI crossing — comparable to a regular C function call, no
+per-call FFI dispatch table lookup as in dlopen-style loaders.
+The output-buffer cache on `Itb.Encryptor.Encryptor` skips the
+size-probe round-trip
+and a duplicate encrypt on every call; pre-allocation uses a 1.25×
+upper bound (the empirical ITB ciphertext-expansion factor measured
+at ≤ 1.155 across every primitive / mode / nonce / payload-size
+combination) and the cache is wiped on grow, on `Close`, and on
+`Finalize`.
 
 ## Streaming AEAD
 
@@ -168,7 +223,7 @@ with Itb.Wrapper;
 declare
    Enc        : Itb.Encryptor.Encryptor :=
      Itb.Encryptor.Make ("areion512", 1024, "hmac-blake3", 1);
-   --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB inner PRF + seeds keep CSPRNG-fresh randomness per call.
+   --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB Inner seeds + PRF key keep as CSPRNG derived.
    Outer_Key  : constant Itb.Byte_Array :=
      Itb.Wrapper.Generate_Key (Itb.Wrapper.Aes_128_Ctr);
    N_Len      : constant Stream_Element_Offset :=
@@ -293,7 +348,7 @@ declare
    Start : constant Itb.Seed.Seed := Itb.Seed.Make ("areion512", 1024);
    Mac   : constant Itb.MAC.MAC :=
      Itb.MAC.Make ("hmac-blake3", Random_MAC_Key);
-   --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB inner PRF + seeds keep CSPRNG-fresh randomness per call.
+   --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB Inner seeds + PRF key keep as CSPRNG derived.
    Outer_Key : constant Itb.Byte_Array :=
      Itb.Wrapper.Generate_Key (Itb.Wrapper.Aes_128_Ctr);
    N_Len     : constant Stream_Element_Offset :=
@@ -429,7 +484,7 @@ procedure Sender is
    Plaintext : constant Itb.Byte_Array :=
      To_Bytes ("any text or binary data - including 0x00 bytes");
 
-   --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB inner PRF + seeds keep CSPRNG-fresh randomness per call.
+   --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB Inner seeds + PRF key keep as CSPRNG derived.
    Outer_Key : constant Itb.Byte_Array :=
      Itb.Wrapper.Generate_Key (Itb.Wrapper.Aes_128_Ctr);
 
@@ -626,7 +681,7 @@ with Itb.Wrapper;
 
 procedure Mixed_Sender is
    Plaintext : constant Itb.Byte_Array := ...;   --  payload bytes
-   --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB inner PRF + seeds keep CSPRNG-fresh randomness per call.
+   --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB Inner seeds + PRF key keep as CSPRNG derived.
    Outer_Key : constant Itb.Byte_Array :=
      Itb.Wrapper.Generate_Key (Itb.Wrapper.Aes_128_Ctr);
 begin
@@ -729,7 +784,7 @@ procedure Triple_Demo is
         Mac_Name  => "hmac-blake3",
         Mode      => 3);
 
-   --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB inner PRF + seeds keep CSPRNG-fresh randomness per call.
+   --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB Inner seeds + PRF key keep as CSPRNG derived.
    Outer_Key : constant Itb.Byte_Array :=
      Itb.Wrapper.Generate_Key (Itb.Wrapper.Aes_128_Ctr);
 
@@ -801,7 +856,7 @@ procedure Lowlevel_Sender is
    Mac_Key   : constant Itb.Byte_Array (1 .. 32) := [others => 0];
    --  Real code should pull Mac_Key from a CSPRNG; the zero key here
    --  is for example purposes only.
-   --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB inner PRF + seeds keep CSPRNG-fresh randomness per call.
+   --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB Inner seeds + PRF key keep as CSPRNG derived.
    Outer_Key : constant Itb.Byte_Array :=
      Itb.Wrapper.Generate_Key (Itb.Wrapper.Aes_128_Ctr);
 begin
@@ -971,7 +1026,7 @@ procedure Stream_Demo is
    D : constant Itb.Seed.Seed := Itb.Seed.Make ("blake3", 1024);
    S : constant Itb.Seed.Seed := Itb.Seed.Make ("blake3", 1024);
 
-   --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB inner PRF + seeds keep CSPRNG-fresh randomness per call.
+   --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB Inner seeds + PRF key keep as CSPRNG derived.
    Outer_Key : constant Itb.Byte_Array :=
      Itb.Wrapper.Generate_Key (Itb.Wrapper.Aes_128_Ctr);
    N_Len : constant Stream_Element_Offset :=
@@ -1136,6 +1191,18 @@ seed; check `Itb.Encryptor.Has_PRF_Keys (Self)` before calling
 All seeds passed to one `Itb.Cipher.Encrypt` / `Decrypt` call must
 share the same native hash width. Mixing widths raises
 `Itb.Errors.Itb_Error` with `Status_Code = Itb.Status.Seed_Width_Mix`.
+
+## MAC primitives
+
+Names match the libitb MAC registry; ordering matches that registry's declaration order.
+
+| MAC | Key bytes | Tag bytes | Underlying primitive |
+|---|---|---|---|
+| `kmac256` | 32 | 32 | KMAC256 (Keccak-derived) |
+| `hmac-sha256` | 32 | 32 | HMAC over SHA-256 |
+| `hmac-blake3` | 32 | 32 | HMAC over BLAKE3 |
+
+`kmac256` and `hmac-sha256` accept keys 16 bytes and longer; the binding fleet's tests and examples use 32 bytes uniformly across primitives for cross-binding consistency. `hmac-blake3` requires exactly 32 bytes by construction.
 
 ## Process-wide configuration
 
@@ -1308,43 +1375,145 @@ byte.
 | 24 | `Itb.Status.Stream_After_Final` | Streaming AEAD transcript carries chunk bytes after the terminator; raised as `Itb_Stream_After_Final_Error` |
 | 99 | `Itb.Status.Internal` | Generic "internal" sentinel for paths the caller cannot recover from at the binding layer |
 
-## Benchmarks
+## Constraints
 
-A custom Go-bench-style harness lives under `bench/` and covers the
-four ops (`Encrypt`, `Decrypt`, `Encrypt_Auth`, `Decrypt_Auth`)
-across the nine PRF-grade primitives plus one mixed-primitive
-variant for both Single and Triple Ouroboros at 1024-bit ITB key
-width and 16 MiB payload. See [`bench/README.md`](bench/README.md)
-for invocation / environment variables / output format and
-[`bench/BENCH.md`](bench/BENCH.md) for recorded throughput results
-across the canonical pass matrix.
+- **Ada 2022 minimum.** The `itb.gpr` project file passes
+  `-gnat2022` to the compiler; the wrapper layer uses
+  `Static_Predicate`, expression functions, `'Image` on user-defined
+  types, and other Ada 2022 features. Earlier dialects do not compile
+  the wrapper.
+- **GNAT FSF ≥ 13.** `alire.toml` declares `gnat (>=13)`; older GNAT
+  releases lack full Ada 2022 support.
+- **Alire toolchain manager.** The recommended build flow uses
+  Alire's isolated `gnat_native` + `gprbuild` toolchain (selected via
+  `alr toolchain --select`); a system-wide GNAT FSF install also
+  works for builds that bypass Alire.
+- **Single library project.** All consumer-visible declarations live
+  under `src/Itb.*`; the FFI substrate (`Itb.Sys`) is kept separate
+  so audits can read it independently.
+- **libitb.so required at runtime.** The project links against
+  `dist/<os>-<arch>/libitb.<ext>` via the `Linker_Options` declared
+  in `itb.gpr` — the shared library must be built first and reachable
+  through the loader's search path (compile-time `-L` plus runtime
+  `RPATH` or `LD_LIBRARY_PATH`).
+- **No external runtime deps.** The wrapper imports only
+  `Interfaces.C` and `Ada.Streams` from the standard library; the
+  libitb shared library is the only non-stdlib runtime dependency.
+- **Frozen C ABI.** The `ITB_*` exports declared in `Itb.Sys` (synced
+  from `dist/<os>-<arch>/libitb.h`) are the contract; the binding
+  does not extend or reshape them.
+- **No `dlopen`.** Symbols are bound at link time via `-litb` plus an
+  embedded RPATH. Consumers wanting runtime-resolved FFI loading can
+  wrap the binding's shared library list in their own `dlopen` shim.
 
-The four-pass canonical sweep (Single + Triple × ±LockSeed) that
-fills `bench/BENCH.md` is driven by the wrapper script in the
-binding root:
+## API Overview
 
-```bash
-./bindings/ada/run_bench.sh                  # full 4-pass canonical sweep
-./bindings/ada/run_bench.sh --lockseed-only  # pass 3 + pass 4 only
-```
+The package hierarchy below `Itb` partitions the surface by concern.
+The root `Itb` package exposes library metadata and process-global
+configuration; sibling packages carry the rest.
 
-The harness sets `LD_LIBRARY_PATH` to `dist/linux-amd64/`,
-manages `ITB_LOCKSEED` per pass, and forwards `ITB_NONCE_BITS` /
-`ITB_BENCH_FILTER` / `ITB_BENCH_MIN_SEC` straight through to the
-underlying `obj-bench/bench_single` / `obj-bench/bench_triple`
-binaries (built ahead of time via
-`./bindings/ada/build.sh -- -P itb_bench.gpr`).
+### Library metadata (root `Itb` package)
 
-FFI overhead in the Ada binding is link-time: `pragma Import (C, ...,
-External_Name => "ITB_*")` bakes the C symbol reference into the
-compiled Ada object at compile time, and `ld.so` resolves the symbol
-against the loaded `libitb.so` at process start. Per-call cost is
-one C ABI crossing — comparable to a regular C function call, no
-per-call FFI dispatch table lookup as in dlopen-style loaders.
-The output-buffer cache on `Itb.Encryptor.Encryptor` skips the
-size-probe round-trip
-and a duplicate encrypt on every call; pre-allocation uses a 1.25×
-upper bound (the empirical ITB ciphertext-expansion factor measured
-at ≤ 1.155 across every primitive / mode / nonce / payload-size
-combination) and the cache is wiped on grow, on `Close`, and on
-`Finalize`.
+| Subprogram | Purpose |
+|---|---|
+| `function Version return String` | Library version `"<major>.<minor>.<patch>"` |
+| `function Max_Key_Bits return Natural` | Max supported ITB key width in bits |
+| `function Channels return Natural` | Number of native channel slots |
+| `function Header_Size return Natural` | Current chunk header size in bytes |
+| `function Parse_Chunk_Len (Header : Byte_Array) return Natural` | Parse chunk header, return total on-wire chunk length |
+| `function List_Hashes return Hash_List` / `function List_MACs return MAC_List` | Catalogue accessors |
+| `function Hash_Count / Hash_Name / Hash_Width / MAC_Count / MAC_Name / MAC_Key_Size / MAC_Tag_Size / MAC_Min_Key_Bytes` | Indexed catalogue accessors |
+
+### Process-wide configuration (root `Itb` package)
+
+| Subprogram | Purpose |
+|---|---|
+| `procedure Set_Bit_Soup (Mode : Integer)` / `function Get_Bit_Soup return Integer` | Bit Soup mode toggle |
+| `procedure Set_Lock_Soup (Mode : Integer)` / `function Get_Lock_Soup return Integer` | Lock Soup mode toggle |
+| `procedure Set_Max_Workers (N : Integer)` / `function Get_Max_Workers return Integer` | Worker pool cap |
+| `procedure Set_Nonce_Bits (N : Integer)` / `function Get_Nonce_Bits return Integer` | Nonce width (128 / 256 / 512) |
+| `procedure Set_Barrier_Fill (N : Integer)` / `function Get_Barrier_Fill return Integer` | Barrier-fill factor |
+| `function Set_Memory_Limit (Limit : Interfaces.Integer_64) return Interfaces.Integer_64` | Go runtime heap soft limit in bytes; pass negative to query only |
+| `function Set_GC_Percent (Pct : Interfaces.C.int) return Interfaces.C.int` | Go GC trigger percentage; pass negative to query only |
+
+### Seeds and MAC (`Itb.Seed`, `Itb.MAC`)
+
+| Subprogram | Purpose |
+|---|---|
+| `function Itb.Seed.Make (Hash_Name : String; Key_Bits : Integer) return Seed` | CSPRNG-fresh seed |
+| `function Itb.Seed.From_Components (...)` | Reconstruct from explicit components |
+| `function Width / Hash_Name / Hash_Name_Introspect / Hash_Key / Components` | Seed introspection |
+| `procedure Attach_Lock_Seed (Self : Seed; Lock : Seed)` | Bind a lock seed onto a noise seed |
+| `function Itb.MAC.Make (Mac_Name : String; Key : Byte_Array) return MAC` | Construct MAC handle |
+
+### Low-level cipher (`Itb.Cipher`)
+
+| Subprogram | Purpose |
+|---|---|
+| `function Encrypt (Noise, Data, Start, Plaintext) return Byte_Array` / `function Decrypt (...)` | Single Message |
+| `function Encrypt_Auth (Noise, Data, Start, MAC, Plaintext)` / `function Decrypt_Auth (...)` | MAC-authenticated counterparts |
+| `function Encrypt_Triple (Noise, D1, D2, D3, S1, S2, S3, Plaintext)` / `function Decrypt_Triple (...)` | Triple Ouroboros |
+| `function Encrypt_Auth_Triple (...)` / `function Decrypt_Auth_Triple (...)` | Triple Ouroboros MAC-authenticated |
+
+### Easy Mode encryptor (`Itb.Encryptor`)
+
+| Subprogram | Purpose |
+|---|---|
+| `function Make (Primitive : String; Key_Bits : Integer; MAC : String := ""; Mode : String := "single") return Encryptor` | Single-primitive constructor |
+| `function Mixed_Single (Primitives, Key_Bits, MAC) return Encryptor` / `function Mixed_Triple (...) return Encryptor` | Mixed-primitive Single / Triple |
+| `function Encrypt / Decrypt / Encrypt_Auth / Decrypt_Auth (Self, Buffer) return Byte_Array` | Cipher entry points |
+| `procedure Set_Nonce_Bits / Set_Barrier_Fill / Set_Bit_Soup / Set_Lock_Soup / Set_Lock_Seed / Set_Chunk_Size` | Per-instance setters |
+| `function Primitive / Primitive_At / Key_Bits / Mode / MAC_Name / Seed_Count / Has_PRF_Keys / Is_Mixed / Nonce_Bits / Header_Size` | Accessors |
+| `function Get_Seed_Components / Get_PRF_Key / Get_MAC_Key (Self)` | Key-material accessors |
+| `function Parse_Chunk_Len (Self, Header)` | Per-instance chunk-length parser |
+| `function Export_State (Self) return Byte_Array` / `procedure Import_State (Self; Blob)` | State-blob persistence |
+| `function Peek_Config (Blob : Byte_Array) return Peeked_Config` | Pre-import discriminator |
+| `procedure Encrypt_Stream_Auth (...)` / `procedure Decrypt_Stream_Auth (...)` / `procedure Encrypt_Stream (...)` / `procedure Decrypt_Stream (...)` | Easy Mode streaming over Ada.Streams |
+| `procedure Close (Self : in out Encryptor)` | Release encryptor (Controlled finaliser also runs on scope exit) |
+
+### Streaming AEAD (`Itb.Streams`)
+
+| Subprogram | Purpose |
+|---|---|
+| `type Stream_Encryptor / Stream_Decryptor / Stream_Encryptor_Triple / Stream_Decryptor_Triple` | Push-style Low-Level streamers |
+| `type Stream_Encryptor_Auth / Stream_Decryptor_Auth / Stream_Encryptor_Auth_3 / Stream_Decryptor_Auth_3` | Push-style Streaming AEAD streamers |
+| `function Make / Make_Triple / Make_Auth / Make_Auth_Triple (...)` | Constructors per streamer family |
+| `procedure Write_Plaintext / Read_Plaintext / Finish (Self : in out ...)` | Stream loop methods |
+| `procedure Encrypt_Stream / Decrypt_Stream / Encrypt_Stream_Triple / Decrypt_Stream_Triple` | Free-function Low-Level bridges |
+| `procedure Encrypt_Stream_Auth / Decrypt_Stream_Auth / Encrypt_Stream_Auth_Triple / Decrypt_Stream_Auth_Triple` | Free-function Streaming AEAD bridges |
+
+### Native Blob (`Itb.Blob`)
+
+| Subprogram | Purpose |
+|---|---|
+| `type Blob128 / Blob256 / Blob512 is tagged limited private` | Width-specific Native Blob handles |
+| `function New_Blob128 / New_Blob256 / New_Blob512 return Blob<N>` | Constructors |
+| `procedure Set_Key / Set_Components / Set_MAC_Key / Set_MAC_Name (...)` | Field setters |
+| `function Get_Key / Get_Components / Get_MAC_Key / Get_MAC_Name (...)` | Field getters |
+| `function Export (...) / Export_3 (...) ` and `procedure Import (...) / Import_3 (...)` | Serialisation |
+| `type Slot_Type is (Slot_N, Slot_D, ..., Slot_S3, Slot_L)` | Slot enum |
+| `type Export_Opts is mod 2 ** 8` (`Opt_LockSeed`, `Opt_MAC`) | Export opt-in flag bits |
+
+### Wrapper (`Itb.Wrapper`)
+
+| Subprogram | Purpose |
+|---|---|
+| `type Cipher_Type is (Aes_128_Ctr, Cha_Cha_20, Sip_Hash_24)` | Cipher enum |
+| `function Ffi_Name (C : Cipher_Type) return String` | Canonical FFI name |
+| `function Key_Size (C : Cipher_Type) return Natural` / `function Nonce_Size (C : Cipher_Type) return Natural` | Cipher dimension accessors |
+| `function Generate_Key (C : Cipher_Type) return Byte_Array` | CSPRNG-fresh wrapper key |
+| `function Wrap (...) return Byte_Array` / `function Unwrap (...) return Byte_Array` | Single Message Wrap / Unwrap |
+| `procedure Wrap_In_Place (...) / Unwrap_In_Place (...)` | In-place Wrap / Unwrap |
+| `type Wrap_Stream_Writer is tagged limited private` / `type Unwrap_Stream_Reader is tagged limited private` | Streaming wrap writer / unwrap reader |
+| `procedure Initialize / Update / Close` per streamer type | Stream loop methods |
+
+### Error model (`Itb.Errors`)
+
+| Subprogram | Purpose |
+|---|---|
+| `Itb_Error : exception` | Generic exception family (typed subclasses listed below) |
+| `Itb_Easy_Mismatch_Error / Itb_Blob_Mode_Mismatch_Error / Itb_Blob_Malformed_Error / Itb_Blob_Version_Too_New_Error` | Typed cold-path discriminators |
+| `Itb_Stream_Truncated_Error / Itb_Stream_After_Final_Error` | Streaming AEAD transcript-shape exceptions |
+| `function Status_Code (Occurrence) return Integer` / `function Field (Occurrence) return String` / `function Message (Occurrence) return String` | Occurrence accessors |
+| `function Last_Error return String` / `function Last_Mismatch_Field return String` | Per-thread last-error helpers |
+| `procedure Raise_For (Status : Integer)` | Status → exception bridge |

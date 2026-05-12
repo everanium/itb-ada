@@ -362,6 +362,15 @@ package Itb.Sys is
    with Import => True, Convention => C,
         External_Name => "ITB_GetBarrierFill";
 
+   function ITB_SetMemoryLimit
+     (Limit : Interfaces.Integer_64) return Interfaces.Integer_64
+   with Import => True, Convention => C,
+        External_Name => "ITB_SetMemoryLimit";
+
+   function ITB_SetGCPercent (Pct : C_Int) return C_Int
+   with Import => True, Convention => C,
+        External_Name => "ITB_SetGCPercent";
+
    ---------------------------------------------------------------------
    --  Header / chunk-len / max-key-bits utilities
    ---------------------------------------------------------------------
