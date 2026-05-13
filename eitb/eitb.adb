@@ -1,6 +1,6 @@
 --  Ada eitb — runs every wrapper × ITB example end-to-end.
 --
---  Mirrors cmd/eitb/main.go adapted to the Ada binding asymmetry: the
+--  Mirrors tools/eitb/main.go adapted to the Ada binding asymmetry: the
 --  binding has no Ada.Streams.Stream_IO-Driven Non-AEAD wrap surface;
 --  the only Non-AEAD streaming arm is the User-Driven Loop variant.
 --  Streaming AEAD is supported via Encryptor.Encrypt_Stream_Auth /
@@ -37,7 +37,7 @@ with Itb.Wrapper;
 procedure Eitb is
 
    ---------------------------------------------------------------------
-   --  Configuration constants — mirror cmd/eitb/main.go.
+   --  Configuration constants — mirror tools/eitb/main.go.
    ---------------------------------------------------------------------
 
    Single_Message_Bytes : constant Stream_Element_Offset :=

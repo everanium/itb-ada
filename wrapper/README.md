@@ -54,7 +54,7 @@ alr exec -- gprbuild -P itb_eitb.gpr -p
 ./eitb/eitb --example aead -v
 ```
 
-Per-example sketches below mirror `cmd/eitb/main.go`.
+Per-example sketches below mirror `tools/eitb/main.go`.
 
 ### 1. Streaming AEAD Easy (MAC Authenticated, IO-Driven)
 
@@ -125,7 +125,7 @@ begin
 end;
 ```
 
-The allocating `Wrap` / `Unwrap` variants are commented out alongside the in-place defaults in `cmd/eitb/main.go` and `eitb/eitb.adb` so a caller who needs immutability of the input buffer can switch shapes by uncommenting the alternative.
+The allocating `Wrap` / `Unwrap` variants are commented out alongside the in-place defaults in `tools/eitb/main.go` and `eitb/eitb.adb` so a caller who needs immutability of the input buffer can switch shapes by uncommenting the alternative.
 
 ### 6. Single Message — Easy: Areion-SoEM-512 + HMAC-BLAKE3 (MAC Authenticated)
 
