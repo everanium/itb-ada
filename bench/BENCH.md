@@ -53,7 +53,7 @@ build-tag table in [`../README.md`](../README.md) for the
 
 Recorded on Intel Core i7-11700K (Rocket Lake, AVX-512 + VAES,
 8 cores / 16 threads, native Linux), GNAT FSF 15.2.1 + Alire
-2.x, libitb 0.1.0 in c-shared mode.
+2.x, libitb 0.1.1 in c-shared mode.
 
 ### ITB Single 1024-bit (security: P × 2^1024)
 

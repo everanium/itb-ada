@@ -103,7 +103,7 @@ cd bindings/ada
 alr exec -- gprbuild -P itb.gpr
 ```
 
-Crate metadata: `name = "itb"`, `version = "0.1.0-dev"`,
+Crate metadata: `name = "itb"`, `version = "0.1.1-dev"`,
 `license = "MIT"`. The only runtime dependency declared in
 `alire.toml` is `gnat >= 13`; the wrapper itself is pure Ada 2022
 plus the standard library, with the libitb shared library located
