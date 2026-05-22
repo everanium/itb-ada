@@ -1,5 +1,11 @@
 # ITB Ada Binding
 
+> **Security notice.** ITB is an experimental symmetric cipher construction without prior peer review, independent cryptanalysis, or formal certification. The construction's security properties have **not been verified** by independent cryptographers or mathematicians.
+>
+> PRF-grade hash functions are **required**. No warranty is provided.
+
+**No bespoke cryptography.** ITB introduces no cryptographic primitive of its own — no custom S-box, permutation, or round function. It is a construction over existing primitives, much as PGP composes standard ciphers rather than defining one. Such constructions are not the object of algorithm-level cryptographic certification: national regimes (NIST CAVP/FIPS in the US, GOST/FSB in Russia, KCMVP in South Korea, OSCCA's SM-series in China, SOG-IS/EUCC and national lists in the EU, ASD's ISM in Australia) certify **primitives** and the **modules** built on them, not compositional schemes. Eligibility for regulated use is therefore inherited from the primitives ITB is configured with, not conferred by ITB itself.
+
 Ada 2022 / Alire-managed wrapper over the libitb shared library
 (`cmd/cshared`). Link-time C ABI integration via `pragma Import (C,
 ...)`; `Ada.Finalization.Limited_Controlled` for deterministic RAII
@@ -103,7 +109,7 @@ cd bindings/ada
 alr exec -- gprbuild -P itb.gpr
 ```
 
-Crate metadata: `name = "itb"`, `version = "0.1.1-dev"`,
+Crate metadata: `name = "itb"`, `version = "0.1.2-dev"`,
 `license = "MIT"`. The only runtime dependency declared in
 `alire.toml` is `gnat >= 13`; the wrapper itself is pure Ada 2022
 plus the standard library, with the libitb shared library located

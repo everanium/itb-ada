@@ -1,6 +1,6 @@
 name = "itb"
 description = "Ada binding to libitb, the ITB cryptographic library."
-version = "0.1.1-dev"
+version = "0.1.2-dev"
 authors = ["everanium"]
 maintainers = ["a@encloud.asia"]
 maintainers-logins = ["everanium"]
