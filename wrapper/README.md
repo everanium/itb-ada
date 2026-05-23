@@ -150,30 +150,30 @@ Same wrap shape as example 5; the difference is that the seed material is held i
 Every example × cipher combination round-trips against random plaintext (1 KiB for Single Message, 64 KiB for streaming) with byte-equality plus a short fingerprint cross-check.
 
 ```
-[PASS] aead-easy-io               + aes        pt=65536 wire=90208
-[PASS] aead-easy-io               + chacha     pt=65536 wire=90204
-[PASS] aead-easy-io               + siphash    pt=65536 wire=90208
-[PASS] aead-lowlevel-io           + aes        pt=65536 wire=90208
-[PASS] aead-lowlevel-io           + chacha     pt=65536 wire=90204
-[PASS] aead-lowlevel-io           + siphash    pt=65536 wire=90208
-[PASS] noaead-easy-userloop       + aes        pt=65536 wire=90192
-[PASS] noaead-easy-userloop       + chacha     pt=65536 wire=90188
-[PASS] noaead-easy-userloop       + siphash    pt=65536 wire=90192
-[PASS] noaead-lowlevel-userloop   + aes        pt=65536 wire=90192
-[PASS] noaead-lowlevel-userloop   + chacha     pt=65536 wire=90188
-[PASS] noaead-lowlevel-userloop   + siphash    pt=65536 wire=90192
-[PASS] message-easy-nomac         + aes        pt=1024 wire=4316
-[PASS] message-easy-nomac         + chacha     pt=1024 wire=4312
-[PASS] message-easy-nomac         + siphash    pt=1024 wire=4316
-[PASS] message-easy-auth          + aes        pt=1024 wire=8276
-[PASS] message-easy-auth          + chacha     pt=1024 wire=8272
-[PASS] message-easy-auth          + siphash    pt=1024 wire=8276
-[PASS] message-lowlevel-nomac     + aes        pt=1024 wire=4316
-[PASS] message-lowlevel-nomac     + chacha     pt=1024 wire=4312
-[PASS] message-lowlevel-nomac     + siphash    pt=1024 wire=4316
-[PASS] message-lowlevel-auth      + aes        pt=1024 wire=8276
-[PASS] message-lowlevel-auth      + chacha     pt=1024 wire=8272
-[PASS] message-lowlevel-auth      + siphash    pt=1024 wire=8276
+[PASS] aead-easy-io               + aescmac    pt=65536 wire=90208
+[PASS] aead-easy-io               + chacha20   pt=65536 wire=90204
+[PASS] aead-easy-io               + siphash24  pt=65536 wire=90208
+[PASS] aead-lowlevel-io           + aescmac    pt=65536 wire=90208
+[PASS] aead-lowlevel-io           + chacha20   pt=65536 wire=90204
+[PASS] aead-lowlevel-io           + siphash24  pt=65536 wire=90208
+[PASS] noaead-easy-userloop       + aescmac    pt=65536 wire=90192
+[PASS] noaead-easy-userloop       + chacha20   pt=65536 wire=90188
+[PASS] noaead-easy-userloop       + siphash24  pt=65536 wire=90192
+[PASS] noaead-lowlevel-userloop   + aescmac    pt=65536 wire=90192
+[PASS] noaead-lowlevel-userloop   + chacha20   pt=65536 wire=90188
+[PASS] noaead-lowlevel-userloop   + siphash24  pt=65536 wire=90192
+[PASS] message-easy-nomac         + aescmac    pt=1024 wire=4316
+[PASS] message-easy-nomac         + chacha20   pt=1024 wire=4312
+[PASS] message-easy-nomac         + siphash24  pt=1024 wire=4316
+[PASS] message-easy-auth          + aescmac    pt=1024 wire=8276
+[PASS] message-easy-auth          + chacha20   pt=1024 wire=8272
+[PASS] message-easy-auth          + siphash24  pt=1024 wire=8276
+[PASS] message-lowlevel-nomac     + aescmac    pt=1024 wire=4316
+[PASS] message-lowlevel-nomac     + chacha20   pt=1024 wire=4312
+[PASS] message-lowlevel-nomac     + siphash24  pt=1024 wire=4316
+[PASS] message-lowlevel-auth      + aescmac    pt=1024 wire=8276
+[PASS] message-lowlevel-auth      + chacha20   pt=1024 wire=8272
+[PASS] message-lowlevel-auth      + siphash24  pt=1024 wire=8276
 
 === Summary: 24 PASS, 0 FAIL ===
 ```

@@ -76,7 +76,7 @@ package Itb.Wrapper is
 
    --  Outer cipher selected per wrap session. Each variant maps to
    --  one of the three cipher-name strings the libitb FFI accepts:
-   --  "aes" / "chacha" / "siphash". The Go-side constants are
+   --  "aescmac" / "chacha20" / "siphash24". The Go-side constants are
    --  wrapper.CipherAES128CTR / wrapper.CipherChaCha20 /
    --  wrapper.CipherSipHash24.
    type Cipher_Type is (Aes_128_Ctr, Cha_Cha_20, Sip_Hash_24);
@@ -86,8 +86,8 @@ package Itb.Wrapper is
    All_Ciphers : constant Cipher_Array :=
      [Aes_128_Ctr, Cha_Cha_20, Sip_Hash_24];
 
-   --  Returns the canonical FFI cipher-name string ("aes" / "chacha"
-   --  / "siphash") for the given Cipher_Type. Used at every libitb
+   --  Returns the canonical FFI cipher-name string ("aescmac" / "chacha20"
+   --  / "siphash24") for the given Cipher_Type. Used at every libitb
    --  call site that takes a const char* cipherName argument.
    function Ffi_Name (C : Cipher_Type) return String;
 
@@ -111,6 +111,17 @@ package Itb.Wrapper is
    --  stream nonce drawn internally by Wrap / Wrap_In_Place /
    --  Initialize is the safety boundary.
    function Generate_Key (C : Cipher_Type) return Byte_Array;
+
+   --  Deterministically derives the outer cipher key for C from a
+   --  caller-supplied Master secret (e.g. an ML-KEM shared secret).
+   --  The result is a deterministic function of (C, Master), so both
+   --  endpoints derive the same key from a shared master. Master must
+   --  be at least Key_Size(C) bytes; returns the derived key of length
+   --  Key_Size(C) (16 / 32 / 16 for AES / ChaCha / SipHash). Raises an
+   --  Itb_Error when Master is shorter than the cipher's key size.
+   function Derive_Key
+     (C      : Cipher_Type;
+      Master : Byte_Array) return Byte_Array;
 
    ---------------------------------------------------------------------
    --  Single Message Wrap / Unwrap (allocating)

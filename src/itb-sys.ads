@@ -1071,8 +1071,8 @@ package Itb.Sys is
    --       UnwrapStreamReader_Init/_Update/_Free)
    --
    --  The cipher_name argument selects the outer keystream cipher:
-   --  "aes" (AES-128-CTR — 16-byte key + 16-byte nonce), "chacha"
-   --  (ChaCha20 (RFC8439) — 32-byte key + 12-byte nonce), or "siphash"
+   --  "aescmac" (AES-128-CTR — 16-byte key + 16-byte nonce), "chacha20"
+   --  (ChaCha20 (RFC8439) — 32-byte key + 12-byte nonce), or "siphash24"
    --  (SipHash-2-4 in CTR mode — 16-byte key + 16-byte nonce). All
    --  three FFI strings are NUL-terminated.
 
@@ -1089,6 +1089,17 @@ package Itb.Sys is
       return C_Int
    with Import => True, Convention => C,
         External_Name => "ITB_WrapperNonceSize";
+
+   function ITB_WrapperDeriveKey
+     (Cipher_Name : C_String;
+      Master      : System.Address;
+      Master_Len  : Size_T;
+      Out_Buf     : System.Address;
+      Out_Cap     : Size_T;
+      Out_Len     : access Size_T)
+      return C_Int
+   with Import => True, Convention => C,
+        External_Name => "ITB_WrapperDeriveKey";
 
    function ITB_Wrap
      (Cipher_Name : C_String;

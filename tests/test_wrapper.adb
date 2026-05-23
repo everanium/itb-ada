@@ -75,6 +75,40 @@ begin
    end loop;
 
    ------------------------------------------------------------------
+   --  Derive_Key: deterministic derivation from a 32-byte master
+   --  (a stand-in for an ML-KEM shared secret; the binding ships no
+   --  KEM). Per cipher the derived key is length-correct, two
+   --  derivations from the same (cipher, master) agree, and the key
+   --  drives a full Wrap / Unwrap round-trip.
+   ------------------------------------------------------------------
+   declare
+      Master : constant Byte_Array := Token_Bytes (32);
+   begin
+      for C of All_Ciphers loop
+         declare
+            Want  : constant Natural := Itb.Wrapper.Key_Size (C);
+            Key1  : constant Byte_Array := Itb.Wrapper.Derive_Key (C, Master);
+            Key2  : constant Byte_Array := Itb.Wrapper.Derive_Key (C, Master);
+            Plain : constant Byte_Array := Token_Bytes (1024);
+            Wire  : constant Byte_Array := Itb.Wrapper.Wrap (C, Key1, Plain);
+            Recov : constant Byte_Array := Itb.Wrapper.Unwrap (C, Key1, Wire);
+         begin
+            if Key1'Length /= Stream_Element_Offset (Want) then
+               raise Program_Error
+                 with "Derive_Key length mismatch for "
+                      & Itb.Wrapper.Ffi_Name (C);
+            end if;
+            Assert_Equal
+              (Key1, Key2,
+               "Derive_Key determinism " & Itb.Wrapper.Ffi_Name (C));
+            Assert_Equal
+              (Recov, Plain,
+               "Derive_Key round-trip " & Itb.Wrapper.Ffi_Name (C));
+         end;
+      end loop;
+   end;
+
+   ------------------------------------------------------------------
    --  Wrap / Unwrap round-trip per cipher across several payload
    --  sizes (empty, single byte, mid-size, larger-than-keystream-
    --  refill-block).

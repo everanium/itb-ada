@@ -232,6 +232,8 @@ declare
    --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB Inner seeds + PRF key keep as CSPRNG derived.
    Outer_Key  : constant Itb.Byte_Array :=
      Itb.Wrapper.Generate_Key (Itb.Wrapper.Aes_128_Ctr);
+   --  Outer_Key : constant Itb.Byte_Array :=
+   --    Itb.Wrapper.Derive_Key (Itb.Wrapper.Aes_128_Ctr, Master);
    N_Len      : constant Stream_Element_Offset :=
      Stream_Element_Offset
        (Itb.Wrapper.Nonce_Size (Itb.Wrapper.Aes_128_Ctr));
@@ -357,6 +359,8 @@ declare
    --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB Inner seeds + PRF key keep as CSPRNG derived.
    Outer_Key : constant Itb.Byte_Array :=
      Itb.Wrapper.Generate_Key (Itb.Wrapper.Aes_128_Ctr);
+   --  Outer_Key : constant Itb.Byte_Array :=
+   --    Itb.Wrapper.Derive_Key (Itb.Wrapper.Aes_128_Ctr, Master);
    N_Len     : constant Stream_Element_Offset :=
      Stream_Element_Offset
        (Itb.Wrapper.Nonce_Size (Itb.Wrapper.Aes_128_Ctr));
@@ -493,6 +497,8 @@ procedure Sender is
    --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB Inner seeds + PRF key keep as CSPRNG derived.
    Outer_Key : constant Itb.Byte_Array :=
      Itb.Wrapper.Generate_Key (Itb.Wrapper.Aes_128_Ctr);
+   --  Outer_Key : constant Itb.Byte_Array :=
+   --    Itb.Wrapper.Derive_Key (Itb.Wrapper.Aes_128_Ctr, Master);
 
 begin
    --  Per-instance configuration — mutates only this encryptor's
@@ -690,6 +696,8 @@ procedure Mixed_Sender is
    --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB Inner seeds + PRF key keep as CSPRNG derived.
    Outer_Key : constant Itb.Byte_Array :=
      Itb.Wrapper.Generate_Key (Itb.Wrapper.Aes_128_Ctr);
+   --  Outer_Key : constant Itb.Byte_Array :=
+   --    Itb.Wrapper.Derive_Key (Itb.Wrapper.Aes_128_Ctr, Master);
 begin
    --  Per-slot primitive selection (Single Ouroboros, 3 + 1 slots).
    --  Every name must share the same native hash width - mixing
@@ -793,6 +801,8 @@ procedure Triple_Demo is
    --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB Inner seeds + PRF key keep as CSPRNG derived.
    Outer_Key : constant Itb.Byte_Array :=
      Itb.Wrapper.Generate_Key (Itb.Wrapper.Aes_128_Ctr);
+   --  Outer_Key : constant Itb.Byte_Array :=
+   --    Itb.Wrapper.Derive_Key (Itb.Wrapper.Aes_128_Ctr, Master);
 
    Encrypted : Itb.Byte_Array :=
      Itb.Encryptor.Encrypt_Auth (Enc, Plaintext);
@@ -865,6 +875,8 @@ procedure Lowlevel_Sender is
    --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB Inner seeds + PRF key keep as CSPRNG derived.
    Outer_Key : constant Itb.Byte_Array :=
      Itb.Wrapper.Generate_Key (Itb.Wrapper.Aes_128_Ctr);
+   --  Outer_Key : constant Itb.Byte_Array :=
+   --    Itb.Wrapper.Derive_Key (Itb.Wrapper.Aes_128_Ctr, Master);
 begin
    --  Optional: global configuration (all process-wide, atomic).
    Itb.Set_Max_Workers   (8);   --  limit to 8 CPU cores (default: 0 = all CPUs)
@@ -1035,6 +1047,8 @@ procedure Stream_Demo is
    --  Outer cipher key - preferred surface for HKDF / ML-KEM / key-rotation policy in user-side application. ITB Inner seeds + PRF key keep as CSPRNG derived.
    Outer_Key : constant Itb.Byte_Array :=
      Itb.Wrapper.Generate_Key (Itb.Wrapper.Aes_128_Ctr);
+   --  Outer_Key : constant Itb.Byte_Array :=
+   --    Itb.Wrapper.Derive_Key (Itb.Wrapper.Aes_128_Ctr, Master);
    N_Len : constant Stream_Element_Offset :=
      Stream_Element_Offset
        (Itb.Wrapper.Nonce_Size (Itb.Wrapper.Aes_128_Ctr));

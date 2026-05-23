@@ -1679,9 +1679,9 @@ procedure Bench_Wrapper is
    function Cipher_Slug (C : Outer_Cipher) return String is
    begin
       case C is
-         when Itb.Wrapper.Aes_128_Ctr => return "aes";
-         when Itb.Wrapper.Cha_Cha_20  => return "chacha";
-         when Itb.Wrapper.Sip_Hash_24 => return "siphash";
+         when Itb.Wrapper.Aes_128_Ctr => return "aescmac";
+         when Itb.Wrapper.Cha_Cha_20  => return "chacha20";
+         when Itb.Wrapper.Sip_Hash_24 => return "siphash24";
       end case;
    end Cipher_Slug;
 

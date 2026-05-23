@@ -54,9 +54,9 @@ package body Itb.Wrapper is
    function Ffi_Name (C : Cipher_Type) return String is
    begin
       case C is
-         when Aes_128_Ctr => return "aes";
-         when Cha_Cha_20  => return "chacha";
-         when Sip_Hash_24 => return "siphash";
+         when Aes_128_Ctr => return "aescmac";
+         when Cha_Cha_20  => return "chacha20";
+         when Sip_Hash_24 => return "siphash24";
       end case;
    end Ffi_Name;
 
@@ -65,9 +65,9 @@ package body Itb.Wrapper is
    --  and avoid the per-call Strings.New_String / Strings.Free
    --  bracket — leaks across an exception-raising path are then
    --  structurally impossible.
-   Cipher_Names_Aes  : aliased Interfaces.C.char_array := Interfaces.C.To_C ("aes", True);
-   Cipher_Names_Cha  : aliased Interfaces.C.char_array := Interfaces.C.To_C ("chacha", True);
-   Cipher_Names_Sip  : aliased Interfaces.C.char_array := Interfaces.C.To_C ("siphash", True);
+   Cipher_Names_Aes  : aliased Interfaces.C.char_array := Interfaces.C.To_C ("aescmac", True);
+   Cipher_Names_Cha  : aliased Interfaces.C.char_array := Interfaces.C.To_C ("chacha20", True);
+   Cipher_Names_Sip  : aliased Interfaces.C.char_array := Interfaces.C.To_C ("siphash24", True);
 
    function Cipher_Name_Ptr
      (C : Cipher_Type) return Interfaces.C.Strings.chars_ptr is
@@ -171,6 +171,32 @@ package body Itb.Wrapper is
       end;
       return Out_Buf;
    end Generate_Key;
+
+   function Derive_Key
+     (C      : Cipher_Type;
+      Master : Byte_Array) return Byte_Array
+   is
+      use Interfaces.C;
+      K_Len       : constant Natural := Probe_Key_Size (C);
+      Out_Buf     : Byte_Array (1 .. Stream_Element_Offset (K_Len));
+      Out_Len     : aliased size_t := 0;
+      Status      : int;
+      Master_Addr : constant System.Address :=
+        (if Master'Length > 0 then Master'Address else System.Null_Address);
+   begin
+      if Master'Length < Stream_Element_Offset (K_Len) then
+         Itb.Errors.Raise_For (Itb.Status.Bad_Input);
+      end if;
+      Status := Itb.Sys.ITB_WrapperDeriveKey
+                  (Cipher_Name => Cipher_Name_Ptr (C),
+                   Master      => Master_Addr,
+                   Master_Len  => size_t (Master'Length),
+                   Out_Buf     => Out_Buf'Address,
+                   Out_Cap     => size_t (K_Len),
+                   Out_Len     => Out_Len'Access);
+      Check (Status);
+      return Out_Buf (1 .. Stream_Element_Offset (Out_Len));
+   end Derive_Key;
 
    ---------------------------------------------------------------------
    --  Internal: bound-check helpers
