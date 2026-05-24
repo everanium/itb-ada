@@ -42,10 +42,7 @@ procedure Test_Wrapper is
    end Token_Bytes;
 
    --  Ciphers iterated by every per-cipher test below.
-   All_Ciphers : constant Itb.Wrapper.Cipher_Array :=
-     [Itb.Wrapper.Aes_128_Ctr,
-      Itb.Wrapper.Cha_Cha_20,
-      Itb.Wrapper.Sip_Hash_24];
+   All_Ciphers : Itb.Wrapper.Cipher_Array renames Itb.Wrapper.All_Ciphers;
 
    procedure Assert_Equal
      (Got : Byte_Array; Want : Byte_Array; Tag : String) is
@@ -77,9 +74,12 @@ begin
    ------------------------------------------------------------------
    --  Derive_Key: deterministic derivation from a 32-byte master
    --  (a stand-in for an ML-KEM shared secret; the binding ships no
-   --  KEM). Per cipher the derived key is length-correct, two
-   --  derivations from the same (cipher, master) agree, and the key
-   --  drives a full Wrap / Unwrap round-trip.
+   --  KEM). 32 bytes is the wrapper's uniform security floor; the kdf
+   --  layer truncates / stretches it to each cipher's key size, so a
+   --  single 32-byte master keys every outer cipher. Per cipher the
+   --  derived key is length-correct, two derivations from the same
+   --  (cipher, master) agree, and the key drives a full Wrap / Unwrap
+   --  round-trip.
    ------------------------------------------------------------------
    declare
       Master : constant Byte_Array := Token_Bytes (32);
@@ -107,6 +107,43 @@ begin
          end;
       end loop;
    end;
+
+   ------------------------------------------------------------------
+   --  Derive_Key master floor: the wrapper enforces a uniform 32-byte
+   --  master floor for every cipher (not the per-cipher key size). A
+   --  31-byte master surfaces as Itb_Error / Bad_Input; a 32-byte
+   --  master is accepted and yields a length-correct key.
+   ------------------------------------------------------------------
+   for C of All_Ciphers loop
+      declare
+         Short_Master : constant Byte_Array := Token_Bytes (31);
+      begin
+         declare
+            Key : constant Byte_Array := Itb.Wrapper.Derive_Key (C, Short_Master);
+            pragma Unreferenced (Key);
+         begin
+            raise Program_Error
+              with "31-byte master did not raise for "
+                   & Itb.Wrapper.Ffi_Name (C);
+         end;
+      exception
+         when E : Itb.Errors.Itb_Error =>
+            if Itb.Errors.Status_Code (E) /= Itb.Status.Bad_Input then
+               raise;
+            end if;
+      end;
+      declare
+         Floor_Master : constant Byte_Array := Token_Bytes (32);
+         Key          : constant Byte_Array :=
+           Itb.Wrapper.Derive_Key (C, Floor_Master);
+      begin
+         if Key'Length /= Stream_Element_Offset (Itb.Wrapper.Key_Size (C)) then
+            raise Program_Error
+              with "32-byte master key length mismatch for "
+                   & Itb.Wrapper.Ffi_Name (C);
+         end if;
+      end;
+   end loop;
 
    ------------------------------------------------------------------
    --  Wrap / Unwrap round-trip per cipher across several payload

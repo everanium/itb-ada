@@ -75,20 +75,28 @@ package Itb.Wrapper is
    ---------------------------------------------------------------------
 
    --  Outer cipher selected per wrap session. Each variant maps to
-   --  one of the three cipher-name strings the libitb FFI accepts:
-   --  "aescmac" / "chacha20" / "siphash24". The Go-side constants are
-   --  wrapper.CipherAES128CTR / wrapper.CipherChaCha20 /
-   --  wrapper.CipherSipHash24.
-   type Cipher_Type is (Aes_128_Ctr, Cha_Cha_20, Sip_Hash_24);
+   --  one of the nine cipher-name strings the libitb FFI accepts:
+   --  "aescmac" / "chacha20" / "siphash24" / "areion256" / "areion512"
+   --  / "blake2b256" / "blake2b512" / "blake2s" / "blake3". The Go-side
+   --  constants are wrapper.CipherAES128CTR / wrapper.CipherChaCha20 /
+   --  wrapper.CipherSipHash24 and the matching wrapper.Cipher* values
+   --  for the remaining six.
+   type Cipher_Type is
+     (Aes_128_Ctr, Cha_Cha_20, Sip_Hash_24,
+      Areion_256, Areion_512,
+      Blake_2b_256, Blake_2b_512, Blake_2s, Blake_3);
 
    --  Iteration order over every supported outer cipher.
    type Cipher_Array is array (Positive range <>) of Cipher_Type;
    All_Ciphers : constant Cipher_Array :=
-     [Aes_128_Ctr, Cha_Cha_20, Sip_Hash_24];
+     [Areion_256, Areion_512, Sip_Hash_24, Aes_128_Ctr,
+      Blake_2b_256, Blake_2b_512, Blake_2s, Blake_3, Cha_Cha_20];
 
    --  Returns the canonical FFI cipher-name string ("aescmac" / "chacha20"
-   --  / "siphash24") for the given Cipher_Type. Used at every libitb
-   --  call site that takes a const char* cipherName argument.
+   --  / "siphash24" / "areion256" / "areion512" / "blake2b256" /
+   --  "blake2b512" / "blake2s" / "blake3") for the given Cipher_Type.
+   --  Used at every libitb call site that takes a const char* cipherName
+   --  argument.
    function Ffi_Name (C : Cipher_Type) return String;
 
    ---------------------------------------------------------------------
@@ -116,9 +124,13 @@ package Itb.Wrapper is
    --  caller-supplied Master secret (e.g. an ML-KEM shared secret).
    --  The result is a deterministic function of (C, Master), so both
    --  endpoints derive the same key from a shared master. Master must
-   --  be at least Key_Size(C) bytes; returns the derived key of length
-   --  Key_Size(C) (16 / 32 / 16 for AES / ChaCha / SipHash). Raises an
-   --  Itb_Error when Master is shorter than the cipher's key size.
+   --  be at least 32 bytes (the wrapper's uniform security floor — a
+   --  256-bit master matching an ML-KEM shared secret). The kdf layer
+   --  truncates / stretches that master to the per-cipher key length
+   --  internally, so a single 32-byte master keys every outer cipher.
+   --  Returns the derived key of length Key_Size(C) (16 / 32 / 16 for
+   --  AES / ChaCha / SipHash); raises an Itb_Error for a master
+   --  shorter than 32 bytes.
    function Derive_Key
      (C      : Cipher_Type;
       Master : Byte_Array) return Byte_Array;

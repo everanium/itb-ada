@@ -47,20 +47,27 @@ package body Itb.Wrapper is
    end Seed_Rng;
 
    --  Returns the canonical FFI cipher-name string. Ada-side enum
-   --  → libitb-side const-char* roundtrip. These three literal
+   --  → libitb-side const-char* roundtrip. These nine literal
    --  constants must remain bit-identical to the Go-side
    --  wrapper.CipherAES128CTR / wrapper.CipherChaCha20 /
-   --  wrapper.CipherSipHash24 string values.
+   --  wrapper.CipherSipHash24 string values and the matching
+   --  wrapper.Cipher* values for the remaining six.
    function Ffi_Name (C : Cipher_Type) return String is
    begin
       case C is
          when Aes_128_Ctr => return "aescmac";
          when Cha_Cha_20  => return "chacha20";
          when Sip_Hash_24 => return "siphash24";
+         when Areion_256  => return "areion256";
+         when Areion_512  => return "areion512";
+         when Blake_2b_256 => return "blake2b256";
+         when Blake_2b_512 => return "blake2b512";
+         when Blake_2s    => return "blake2s";
+         when Blake_3     => return "blake3";
       end case;
    end Ffi_Name;
 
-   --  Three NUL-terminated cipher-name strings preallocated at
+   --  Nine NUL-terminated cipher-name strings preallocated at
    --  package elaboration. These persist for the program lifetime
    --  and avoid the per-call Strings.New_String / Strings.Free
    --  bracket — leaks across an exception-raising path are then
@@ -68,6 +75,12 @@ package body Itb.Wrapper is
    Cipher_Names_Aes  : aliased Interfaces.C.char_array := Interfaces.C.To_C ("aescmac", True);
    Cipher_Names_Cha  : aliased Interfaces.C.char_array := Interfaces.C.To_C ("chacha20", True);
    Cipher_Names_Sip  : aliased Interfaces.C.char_array := Interfaces.C.To_C ("siphash24", True);
+   Cipher_Names_A256 : aliased Interfaces.C.char_array := Interfaces.C.To_C ("areion256", True);
+   Cipher_Names_A512 : aliased Interfaces.C.char_array := Interfaces.C.To_C ("areion512", True);
+   Cipher_Names_B2b256 : aliased Interfaces.C.char_array := Interfaces.C.To_C ("blake2b256", True);
+   Cipher_Names_B2b512 : aliased Interfaces.C.char_array := Interfaces.C.To_C ("blake2b512", True);
+   Cipher_Names_B2s  : aliased Interfaces.C.char_array := Interfaces.C.To_C ("blake2s", True);
+   Cipher_Names_B3   : aliased Interfaces.C.char_array := Interfaces.C.To_C ("blake3", True);
 
    function Cipher_Name_Ptr
      (C : Cipher_Type) return Interfaces.C.Strings.chars_ptr is
@@ -82,6 +95,24 @@ package body Itb.Wrapper is
          when Sip_Hash_24 =>
             return Interfaces.C.Strings.To_Chars_Ptr
                      (Cipher_Names_Sip'Unchecked_Access);
+         when Areion_256 =>
+            return Interfaces.C.Strings.To_Chars_Ptr
+                     (Cipher_Names_A256'Unchecked_Access);
+         when Areion_512 =>
+            return Interfaces.C.Strings.To_Chars_Ptr
+                     (Cipher_Names_A512'Unchecked_Access);
+         when Blake_2b_256 =>
+            return Interfaces.C.Strings.To_Chars_Ptr
+                     (Cipher_Names_B2b256'Unchecked_Access);
+         when Blake_2b_512 =>
+            return Interfaces.C.Strings.To_Chars_Ptr
+                     (Cipher_Names_B2b512'Unchecked_Access);
+         when Blake_2s =>
+            return Interfaces.C.Strings.To_Chars_Ptr
+                     (Cipher_Names_B2s'Unchecked_Access);
+         when Blake_3 =>
+            return Interfaces.C.Strings.To_Chars_Ptr
+                     (Cipher_Names_B3'Unchecked_Access);
       end case;
    end Cipher_Name_Ptr;
 
@@ -184,9 +215,6 @@ package body Itb.Wrapper is
       Master_Addr : constant System.Address :=
         (if Master'Length > 0 then Master'Address else System.Null_Address);
    begin
-      if Master'Length < Stream_Element_Offset (K_Len) then
-         Itb.Errors.Raise_For (Itb.Status.Bad_Input);
-      end if;
       Status := Itb.Sys.ITB_WrapperDeriveKey
                   (Cipher_Name => Cipher_Name_Ptr (C),
                    Master      => Master_Addr,

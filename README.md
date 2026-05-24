@@ -1518,10 +1518,11 @@ configuration; sibling packages carry the rest.
 
 | Subprogram | Purpose |
 |---|---|
-| `type Cipher_Type is (Aes_128_Ctr, Cha_Cha_20, Sip_Hash_24)` | Cipher enum |
+| `type Cipher_Type is (Aes_128_Ctr, Cha_Cha_20, Sip_Hash_24, Areion_256, Areion_512, Blake_2b_256, Blake_2b_512, Blake_2s, Blake_3)` | Cipher enum |
 | `function Ffi_Name (C : Cipher_Type) return String` | Canonical FFI name |
 | `function Key_Size (C : Cipher_Type) return Natural` / `function Nonce_Size (C : Cipher_Type) return Natural` | Cipher dimension accessors |
 | `function Generate_Key (C : Cipher_Type) return Byte_Array` | CSPRNG-fresh wrapper key |
+| `function Derive_Key (C : Cipher_Type; Master : Byte_Array) return Byte_Array` | Deterministic wrapper key from a master secret (>= 32 bytes, e.g. an ML-KEM shared secret) |
 | `function Wrap (...) return Byte_Array` / `function Unwrap (...) return Byte_Array` | Single Message Wrap / Unwrap |
 | `procedure Wrap_In_Place (...) / Unwrap_In_Place (...)` | In-place Wrap / Unwrap |
 | `type Wrap_Stream_Writer is tagged limited private` / `type Unwrap_Stream_Reader is tagged limited private` | Streaming wrap writer / unwrap reader |

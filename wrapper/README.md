@@ -6,7 +6,7 @@
 
 **No bespoke cryptography.** ITB introduces no cryptographic primitive of its own — no custom S-box, permutation, or round function. It is a construction over existing primitives, much as PGP composes standard ciphers rather than defining one. Such constructions are not the object of algorithm-level cryptographic certification: national regimes (NIST CAVP/FIPS in the US, GOST/FSB in Russia, KCMVP in South Korea, OSCCA's SM-series in China, SOG-IS/EUCC and national lists in the EU, ASD's ISM in Australia) certify **primitives** and the **modules** built on them, not compositional schemes. Eligibility for regulated use is therefore inherited from the primitives ITB is configured with, not conferred by ITB itself.
 
-Ada-idiomatic surface over the 12 `ITB_Wrap*` / `ITB_Unwrap*` / `ITB_WrapStream*` / `ITB_UnwrapStream*` / `ITB_WrapperKeySize` / `ITB_WrapperNonceSize` exports in `cmd/cshared/main.go`. Wraps an ITB ciphertext under one of three outer keystream ciphers (AES-128-CTR / ChaCha20 (RFC8439) / SipHash-2-4 in CTR mode) so the on-wire bytes carry no ITB-specific format pattern.
+Ada-idiomatic surface over the 12 `ITB_Wrap*` / `ITB_Unwrap*` / `ITB_WrapStream*` / `ITB_UnwrapStream*` / `ITB_WrapperKeySize` / `ITB_WrapperNonceSize` exports in `cmd/cshared/main.go`. Wraps an ITB ciphertext under one of nine outer keystream ciphers (Areion-SoEM-256 / Areion-SoEM-512 / SipHash-2-4 / AES-128-CTR / BLAKE2b-256 / BLAKE2b-512 / BLAKE2s / BLAKE3 / ChaCha20 (RFC8439) in CTR mode) so the on-wire bytes carry no ITB-specific format pattern.
 
 ## Threat model
 
@@ -15,7 +15,7 @@ ITB encrypts content into RGBWYOPA pixel containers. The construction provides *
 - Non-AEAD path: per-chunk header carries width / height / container layout.
 - Streaming AEAD path: a once per-stream 32-byte streamID prefix plus per-chunk `nonce || W || H || container || flag_byte`.
 
-A passive observer who knows ITB ships with an 8-channel pixel container and a 32-byte streamID prefix can pattern-match the bytes. The format-deniability wrap hides that surface under a generic outer cipher: AES-128-CTR, ChaCha20 (RFC8439), or SipHash-2-4 in CTR mode. After wrapping, the wire is `nonce || keystream-XOR(bytestream)` — the same shape used by countless other protocols. An observer sees a small leading nonce followed by pseudorandom-looking bytes; pattern-matching does not distinguish ITB from any other stream cipher payload.
+A passive observer who knows ITB ships with an 8-channel pixel container and a 32-byte streamID prefix can pattern-match the bytes. The format-deniability wrap hides that surface under a generic outer cipher: Areion-SoEM-256, Areion-SoEM-512, SipHash-2-4, AES-128-CTR, BLAKE2b-256, BLAKE2b-512, BLAKE2s, BLAKE3, or ChaCha20 (RFC8439) in CTR mode. After wrapping, the wire is `nonce || keystream-XOR(bytestream)` — the same shape used by countless other protocols. An observer sees a small leading nonce followed by pseudorandom-looking bytes; pattern-matching does not distinguish ITB from any other stream cipher payload.
 
 This is **not** a random-oracle indistinguishability claim. It is a "looks like a different well-known cipher" claim. The wrap exists for format-deniability ONLY; ITB already provides confidentiality (content-deniability) and the AEAD path already provides per-stream and per-chunk integrity. The Non-AEAD streaming path has no integrity by design and the wrap does not add any.
 
@@ -39,9 +39,15 @@ The wrap-stream handles (`Wrap_Stream_Writer` / `Unwrap_Stream_Reader`) inherit 
 
 | Cipher | Key | Nonce | Notes |
 |---|---|---|---|
-| AES-128-CTR | 16 B | 16 B | Go stdlib `crypto/aes` + `crypto/cipher.NewCTR` on the libitb side. AES-NI accelerated. |
-| ChaCha20 (RFC 8439) | 32 B | 12 B | `golang.org/x/crypto/chacha20`. No AES-NI dependency. |
+| Areion-SoEM-256 in CTR mode | 32 B | 16 B | Areion-SoEM-256 PRF in custom CTR construction. Sound under the standard PRF assumption that justifies AES-CTR. |
+| Areion-SoEM-512 in CTR mode | 64 B | 16 B | Areion-SoEM-512 PRF in custom CTR construction. Sound under the standard PRF assumption that justifies AES-CTR. |
 | SipHash-2-4 in CTR mode | 16 B | 16 B | `github.com/dchest/siphash` PRF in custom CTR construction. Sound under the standard PRF assumption that justifies AES-CTR. |
+| AES-128-CTR | 16 B | 16 B | Go stdlib `crypto/aes` + `crypto/cipher.NewCTR` on the libitb side. AES-NI accelerated. |
+| BLAKE2b-256 in CTR mode | 32 B | 16 B | BLAKE2b-256 PRF in custom CTR construction. Sound under the standard PRF assumption that justifies AES-CTR. |
+| BLAKE2b-512 in CTR mode | 32 B | 16 B | BLAKE2b-512 PRF in custom CTR construction. Sound under the standard PRF assumption that justifies AES-CTR. |
+| BLAKE2s in CTR mode | 32 B | 16 B | BLAKE2s PRF in custom CTR construction. Sound under the standard PRF assumption that justifies AES-CTR. |
+| BLAKE3 in CTR mode | 32 B | 16 B | BLAKE3 PRF in custom CTR construction. Sound under the standard PRF assumption that justifies AES-CTR. |
+| ChaCha20 (RFC 8439) | 32 B | 12 B | `golang.org/x/crypto/chacha20`. No AES-NI dependency. |
 
 The SipHash-CTR construction:
 - 16-byte SipHash key = wrapper key.
