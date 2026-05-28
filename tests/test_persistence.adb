@@ -34,12 +34,12 @@ procedure Test_Persistence is
    Canonical_Hashes : constant Hash_Entry_Array :=
      [(H_Areion256'Access,  256),
       (H_Areion512'Access,  512),
-      (H_Siphash24'Access,  128),
-      (H_AESCMAC'Access,    128),
       (H_Blake2b256'Access, 256),
       (H_Blake2b512'Access, 512),
       (H_Blake2s'Access,    256),
       (H_Blake3'Access,     256),
+      (H_AESCMAC'Access,    128),
+      (H_Siphash24'Access,  128),
       (H_Chacha20'Access,   256)];
 
    --  Maps a primitive name to its expected fixed hash-key length in
@@ -51,10 +51,6 @@ procedure Test_Persistence is
          return 32;
       elsif Name = "areion512" then
          return 64;
-      elsif Name = "siphash24" then
-         return 0;
-      elsif Name = "aescmac" then
-         return 16;
       elsif Name = "blake2b256" then
          return 32;
       elsif Name = "blake2b512" then
@@ -63,6 +59,10 @@ procedure Test_Persistence is
          return 32;
       elsif Name = "blake3" then
          return 32;
+      elsif Name = "aescmac" then
+         return 16;
+      elsif Name = "siphash24" then
+         return 0;
       elsif Name = "chacha20" then
          return 32;
       else

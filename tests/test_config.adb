@@ -19,6 +19,7 @@ procedure Test_Config is
    --  Save every process-global at procedure entry; restore on exit.
    Saved_Bit_Soup     : constant Integer := Itb.Get_Bit_Soup;
    Saved_Lock_Soup    : constant Integer := Itb.Get_Lock_Soup;
+   Saved_Lock_Batch   : constant Integer := Itb.Get_Lock_Batch;
    Saved_Max_Workers  : constant Integer := Itb.Get_Max_Workers;
    Saved_Nonce_Bits   : constant Integer := Itb.Get_Nonce_Bits;
    Saved_Barrier_Fill : constant Integer := Itb.Get_Barrier_Fill;
@@ -54,6 +55,15 @@ begin
       raise Program_Error with "Lock_Soup setter did not stick (1)";
    end if;
    Itb.Set_Lock_Soup (Saved_Lock_Soup);
+
+   ------------------------------------------------------------------
+   --  lock_batch_roundtrip
+   ------------------------------------------------------------------
+   Itb.Set_Lock_Batch (1);
+   if Itb.Get_Lock_Batch /= 1 then
+      raise Program_Error with "Lock_Batch setter did not stick (1)";
+   end if;
+   Itb.Set_Lock_Batch (Saved_Lock_Batch);
 
    ------------------------------------------------------------------
    --  max_workers_roundtrip
@@ -120,6 +130,7 @@ exception
       begin
          Itb.Set_Bit_Soup     (Saved_Bit_Soup);
          Itb.Set_Lock_Soup    (Saved_Lock_Soup);
+         Itb.Set_Lock_Batch   (Saved_Lock_Batch);
          Itb.Set_Max_Workers  (Saved_Max_Workers);
          Itb.Set_Nonce_Bits   (Saved_Nonce_Bits);
          Itb.Set_Barrier_Fill (Saved_Barrier_Fill);

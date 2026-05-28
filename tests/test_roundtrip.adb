@@ -43,12 +43,12 @@ procedure Test_Roundtrip is
    Canonical_Hashes : constant Hash_Entry_Array :=
      [(H_Areion256'Access,  256),
       (H_Areion512'Access,  512),
-      (H_Siphash24'Access,  128),
-      (H_AESCMAC'Access,    128),
       (H_Blake2b256'Access, 256),
       (H_Blake2b512'Access, 512),
       (H_Blake2s'Access,    256),
       (H_Blake3'Access,     256),
+      (H_AESCMAC'Access,    128),
+      (H_Siphash24'Access,  128),
       (H_Chacha20'Access,   256)];
 
    type Int_Array is array (Positive range <>) of Integer;

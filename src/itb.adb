@@ -243,6 +243,20 @@ package body Itb is
       return Integer (Itb.Sys.ITB_GetLockSoup);
    end Get_Lock_Soup;
 
+   procedure Set_Lock_Batch (Mode : Integer) is
+      use Interfaces.C;
+      Status : constant int := Itb.Sys.ITB_SetLockBatch (int (Mode));
+   begin
+      if Status /= 0 then
+         Itb.Errors.Raise_For (Integer (Status));
+      end if;
+   end Set_Lock_Batch;
+
+   function Get_Lock_Batch return Integer is
+   begin
+      return Integer (Itb.Sys.ITB_GetLockBatch);
+   end Get_Lock_Batch;
+
    procedure Set_Max_Workers (N : Integer) is
       use Interfaces.C;
       Status : constant int := Itb.Sys.ITB_SetMaxWorkers (int (N));

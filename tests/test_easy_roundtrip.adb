@@ -39,12 +39,12 @@ procedure Test_Easy_Roundtrip is
    Canonical_Hashes : constant Width_Pair_Array :=
      [(Hash_Areion256'Access,  256),
       (Hash_Areion512'Access,  512),
-      (Hash_Siphash24'Access,  128),
-      (Hash_Aescmac'Access,    128),
       (Hash_Blake2b256'Access, 256),
       (Hash_Blake2b512'Access, 512),
       (Hash_Blake2s'Access,    256),
       (Hash_Blake3'Access,     256),
+      (Hash_Aescmac'Access,    128),
+      (Hash_Siphash24'Access,  128),
       (Hash_Chacha20'Access,   256)];
 
    type Int_Array is array (Positive range <>) of Integer;

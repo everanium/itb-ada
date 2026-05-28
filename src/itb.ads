@@ -162,6 +162,12 @@ package Itb is
    procedure Set_Lock_Soup (Mode : Integer);
    function  Get_Lock_Soup return Integer;
 
+   --  Process-wide Lock Batch mode (0 = off, non-zero = on).
+   --  Per-chunk PRF batching for the Lock Soup overlay; inert unless
+   --  Lock Soup is engaged. Same lifecycle rules as Set_Lock_Soup.
+   procedure Set_Lock_Batch (Mode : Integer);
+   function  Get_Lock_Batch return Integer;
+
    procedure Set_Max_Workers (N : Integer);
    function  Get_Max_Workers return Integer;
 

@@ -69,6 +69,15 @@ package body Common is
       end if;
    end Env_Nonce_Bits;
 
+   function Env_Lock_Batch return Boolean is
+      V : constant String := Env_Get ("ITB_LOCKBATCH");
+   begin
+      if V = "" then
+         return False;
+      end if;
+      return V /= "0";
+   end Env_Lock_Batch;
+
    function Env_Lock_Seed return Boolean is
       V : constant String := Env_Get ("ITB_LOCKSEED");
    begin
@@ -134,6 +143,15 @@ package body Common is
    ---------------------------------------------------------------------
    --  Encryptor helper
    ---------------------------------------------------------------------
+
+   procedure Apply_Lock_Batch_If_Requested
+     (Enc : Itb.Encryptor.Encryptor)
+   is
+   begin
+      if Env_Lock_Batch then
+         Itb.Encryptor.Set_Lock_Batch (Enc, 1);
+      end if;
+   end Apply_Lock_Batch_If_Requested;
 
    procedure Apply_Lock_Seed_If_Requested
      (Enc : Itb.Encryptor.Encryptor)
@@ -387,5 +405,10 @@ package body Common is
          end if;
       end loop;
    end Run_All;
+
+   procedure Measure_One (B : Bench_Case; Min_Seconds : Float) is
+   begin
+      Measure (B, Min_Seconds);
+   end Measure_One;
 
 end Common;

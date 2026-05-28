@@ -6,7 +6,7 @@
 
 **No bespoke cryptography.** ITB introduces no cryptographic primitive of its own — no custom S-box, permutation, or round function. It is a construction over existing primitives, much as PGP composes standard ciphers rather than defining one. Such constructions are not the object of algorithm-level cryptographic certification: national regimes (NIST CAVP/FIPS in the US, GOST/FSB in Russia, KCMVP in South Korea, OSCCA's SM-series in China, SOG-IS/EUCC and national lists in the EU, ASD's ISM in Australia) certify **primitives** and the **modules** built on them, not compositional schemes. Eligibility for regulated use is therefore inherited from the primitives ITB is configured with, not conferred by ITB itself.
 
-Ada-idiomatic surface over the 12 `ITB_Wrap*` / `ITB_Unwrap*` / `ITB_WrapStream*` / `ITB_UnwrapStream*` / `ITB_WrapperKeySize` / `ITB_WrapperNonceSize` exports in `cmd/cshared/main.go`. Wraps an ITB ciphertext under one of nine outer keystream ciphers (Areion-SoEM-256 / Areion-SoEM-512 / SipHash-2-4 / AES-128-CTR / BLAKE2b-256 / BLAKE2b-512 / BLAKE2s / BLAKE3 / ChaCha20 (RFC8439) in CTR mode) so the on-wire bytes carry no ITB-specific format pattern.
+Ada-idiomatic surface over the 12 `ITB_Wrap*` / `ITB_Unwrap*` / `ITB_WrapStream*` / `ITB_UnwrapStream*` / `ITB_WrapperKeySize` / `ITB_WrapperNonceSize` exports in `cmd/cshared/main.go`. Wraps an ITB ciphertext under outer keystream ciphers in CTR mode, so the on-wire bytes carry no ITB-specific format pattern.
 
 ## Threat model
 
@@ -15,7 +15,7 @@ ITB encrypts content into RGBWYOPA pixel containers. The construction provides *
 - Non-AEAD path: per-chunk header carries width / height / container layout.
 - Streaming AEAD path: a once per-stream 32-byte streamID prefix plus per-chunk `nonce || W || H || container || flag_byte`.
 
-A passive observer who knows ITB ships with an 8-channel pixel container and a 32-byte streamID prefix can pattern-match the bytes. The format-deniability wrap hides that surface under a generic outer cipher: Areion-SoEM-256, Areion-SoEM-512, SipHash-2-4, AES-128-CTR, BLAKE2b-256, BLAKE2b-512, BLAKE2s, BLAKE3, or ChaCha20 (RFC8439) in CTR mode. After wrapping, the wire is `nonce || keystream-XOR(bytestream)` — the same shape used by countless other protocols. An observer sees a small leading nonce followed by pseudorandom-looking bytes; pattern-matching does not distinguish ITB from any other stream cipher payload.
+A passive observer who knows ITB ships with an 8-channel pixel container and a 32-byte streamID prefix can pattern-match the bytes. The format-deniability wrap hides that surface under a generic outer cipher in CTR mode. After wrapping, the wire is `nonce || keystream-XOR(bytestream)` — the same shape used by countless other protocols. An observer sees a small leading nonce followed by pseudorandom-looking bytes; pattern-matching does not distinguish ITB from any other stream cipher payload.
 
 This is **not** a random-oracle indistinguishability claim. It is a "looks like a different well-known cipher" claim. The wrap exists for format-deniability ONLY; ITB already provides confidentiality (content-deniability) and the AEAD path already provides per-stream and per-chunk integrity. The Non-AEAD streaming path has no integrity by design and the wrap does not add any.
 
@@ -26,7 +26,7 @@ The `Itb.Wrapper` package exposes one `Cipher_Type` enumeration plus three usage
 | Helper | Wire format | Use case |
 |---|---|---|
 | `Wrap` / `Unwrap` | `nonce` + keystream-XOR(blob) | Single Message Encrypt / Encrypt_Auth output, immutable inputs |
-| `Wrap_In_Place` / `Unwrap_In_Place` | `nonce` + keystream-XOR(blob) | zero-allocation steady state on the hot path; mutates the caller's buffer |
+| `Wrap_In_Place` / `Unwrap_In_Place` | `nonce` + keystream-XOR(blob) | no output-buffer allocation on the hot path; mutates the caller's buffer |
 | `Wrap_Stream_Writer` / `Unwrap_Stream_Reader` | `nonce` + keystream-XOR(continuous bytestream) | streaming use — IO-Driven Streaming AEAD or User-Driven Loop where caller-side framing (`u32_LE` length prefix + body) is written through the wrap-writer so the framing bytes also pass through the keystream XOR |
 
 The single keystream advances monotonically across all bytes within one wrap session. A fresh CSPRNG nonce is generated per session on the libitb side; emitted once at stream start; never reused across sessions. This is standard CTR mode usage — within one stream, one nonce + counter is correct.
@@ -37,17 +37,17 @@ The wrap-stream handles (`Wrap_Stream_Writer` / `Unwrap_Stream_Reader`) inherit 
 
 ## Outer ciphers
 
-| Cipher | Key | Nonce | Notes |
-|---|---|---|---|
-| Areion-SoEM-256 in CTR mode | 32 B | 16 B | Areion-SoEM-256 PRF in custom CTR construction. Sound under the standard PRF assumption that justifies AES-CTR. |
-| Areion-SoEM-512 in CTR mode | 64 B | 16 B | Areion-SoEM-512 PRF in custom CTR construction. Sound under the standard PRF assumption that justifies AES-CTR. |
-| SipHash-2-4 in CTR mode | 16 B | 16 B | `github.com/dchest/siphash` PRF in custom CTR construction. Sound under the standard PRF assumption that justifies AES-CTR. |
-| AES-128-CTR | 16 B | 16 B | Go stdlib `crypto/aes` + `crypto/cipher.NewCTR` on the libitb side. AES-NI accelerated. |
-| BLAKE2b-256 in CTR mode | 32 B | 16 B | BLAKE2b-256 PRF in custom CTR construction. Sound under the standard PRF assumption that justifies AES-CTR. |
-| BLAKE2b-512 in CTR mode | 32 B | 16 B | BLAKE2b-512 PRF in custom CTR construction. Sound under the standard PRF assumption that justifies AES-CTR. |
-| BLAKE2s in CTR mode | 32 B | 16 B | BLAKE2s PRF in custom CTR construction. Sound under the standard PRF assumption that justifies AES-CTR. |
-| BLAKE3 in CTR mode | 32 B | 16 B | BLAKE3 PRF in custom CTR construction. Sound under the standard PRF assumption that justifies AES-CTR. |
-| ChaCha20 (RFC 8439) | 32 B | 12 B | `golang.org/x/crypto/chacha20`. No AES-NI dependency. |
+| Cipher | Constant | FFI name | Key | Nonce | Notes |
+|---|---|---|---|---|---|
+| Areion-SoEM-256 in CTR mode | `Itb.Wrapper.Areion_256` | `"areion256"` | 32 B | 16 B | Areion-SoEM-256 PRF in custom CTR construction. Sound under the standard PRF assumption that justifies AES-CTR. |
+| Areion-SoEM-512 in CTR mode | `Itb.Wrapper.Areion_512` | `"areion512"` | 64 B | 16 B | Areion-SoEM-512 PRF in custom CTR construction. Sound under the standard PRF assumption that justifies AES-CTR. |
+| BLAKE2b-256 in CTR mode | `Itb.Wrapper.Blake_2b_256` | `"blake2b256"` | 32 B | 16 B | BLAKE2b-256 PRF in custom CTR construction. Sound under the standard PRF assumption that justifies AES-CTR. |
+| BLAKE2b-512 in CTR mode | `Itb.Wrapper.Blake_2b_512` | `"blake2b512"` | 32 B | 16 B | BLAKE2b-512 PRF in custom CTR construction. Sound under the standard PRF assumption that justifies AES-CTR. |
+| BLAKE2s in CTR mode | `Itb.Wrapper.Blake_2s` | `"blake2s"` | 32 B | 16 B | BLAKE2s PRF in custom CTR construction. Sound under the standard PRF assumption that justifies AES-CTR. |
+| BLAKE3 in CTR mode | `Itb.Wrapper.Blake_3` | `"blake3"` | 32 B | 16 B | BLAKE3 PRF in custom CTR construction. Sound under the standard PRF assumption that justifies AES-CTR. |
+| AES-128-CTR | `Itb.Wrapper.Aes_128_Ctr` | `"aescmac"` | 16 B | 16 B | Go stdlib `crypto/aes` + `crypto/cipher.NewCTR` on the libitb side. AES-NI accelerated. |
+| SipHash-2-4 in CTR mode | `Itb.Wrapper.Sip_Hash_24` | `"siphash24"` | 16 B | 16 B | `github.com/dchest/siphash` PRF in custom CTR construction. Sound under the standard PRF assumption that justifies AES-CTR. |
+| ChaCha20 (RFC 8439) | `Itb.Wrapper.Cha_Cha_20` | `"chacha20"` | 32 B | 12 B | `golang.org/x/crypto/chacha20`. No AES-NI dependency. |
 
 The SipHash-CTR construction:
 - 16-byte SipHash key = wrapper key.
@@ -156,32 +156,25 @@ Same wrap shape as example 5; the difference is that the seed material is held i
 Every example × cipher combination round-trips against random plaintext (1 KiB for Single Message, 64 KiB for streaming) with byte-equality plus a short fingerprint cross-check.
 
 ```
+[PASS] aead-easy-io               + areion256   pt=65536 wire=90208
+[PASS] aead-easy-io               + areion512   pt=65536 wire=90208
+[PASS] aead-easy-io               + blake2b256   pt=65536 wire=90208
+[PASS] aead-easy-io               + blake2b512   pt=65536 wire=90208
+[PASS] aead-easy-io               + blake2s    pt=65536 wire=90208
+[PASS] aead-easy-io               + blake3     pt=65536 wire=90208
 [PASS] aead-easy-io               + aescmac    pt=65536 wire=90208
+[PASS] aead-easy-io               + siphash24   pt=65536 wire=90208
 [PASS] aead-easy-io               + chacha20   pt=65536 wire=90204
-[PASS] aead-easy-io               + siphash24  pt=65536 wire=90208
-[PASS] aead-lowlevel-io           + aescmac    pt=65536 wire=90208
-[PASS] aead-lowlevel-io           + chacha20   pt=65536 wire=90204
-[PASS] aead-lowlevel-io           + siphash24  pt=65536 wire=90208
-[PASS] noaead-easy-userloop       + aescmac    pt=65536 wire=90192
-[PASS] noaead-easy-userloop       + chacha20   pt=65536 wire=90188
-[PASS] noaead-easy-userloop       + siphash24  pt=65536 wire=90192
-[PASS] noaead-lowlevel-userloop   + aescmac    pt=65536 wire=90192
-[PASS] noaead-lowlevel-userloop   + chacha20   pt=65536 wire=90188
-[PASS] noaead-lowlevel-userloop   + siphash24  pt=65536 wire=90192
-[PASS] message-easy-nomac         + aescmac    pt=1024 wire=4316
-[PASS] message-easy-nomac         + chacha20   pt=1024 wire=4312
-[PASS] message-easy-nomac         + siphash24  pt=1024 wire=4316
-[PASS] message-easy-auth          + aescmac    pt=1024 wire=8276
-[PASS] message-easy-auth          + chacha20   pt=1024 wire=8272
-[PASS] message-easy-auth          + siphash24  pt=1024 wire=8276
-[PASS] message-lowlevel-nomac     + aescmac    pt=1024 wire=4316
-[PASS] message-lowlevel-nomac     + chacha20   pt=1024 wire=4312
-[PASS] message-lowlevel-nomac     + siphash24  pt=1024 wire=4316
+...
+[PASS] message-lowlevel-auth      + areion256   pt=1024 wire=8276
+[PASS] message-lowlevel-auth      + areion512   pt=1024 wire=8276
+[PASS] message-lowlevel-auth      + blake2b256   pt=1024 wire=8276
+[PASS] message-lowlevel-auth      + blake2b512   pt=1024 wire=8276
+[PASS] message-lowlevel-auth      + blake2s    pt=1024 wire=8276
+[PASS] message-lowlevel-auth      + blake3     pt=1024 wire=8276
 [PASS] message-lowlevel-auth      + aescmac    pt=1024 wire=8276
+[PASS] message-lowlevel-auth      + siphash24   pt=1024 wire=8276
 [PASS] message-lowlevel-auth      + chacha20   pt=1024 wire=8272
-[PASS] message-lowlevel-auth      + siphash24  pt=1024 wire=8276
-
-=== Summary: 24 PASS, 0 FAIL ===
 ```
 
 The wire-byte difference between cipher columns is exactly the per-stream nonce-size delta (16 vs 12 vs 16 bytes); the User-Driven Loop variants additionally include 4 bytes of keystream-XORed length prefix per chunk.

@@ -493,6 +493,17 @@ package body Itb.Encryptor is
       end if;
    end Set_Lock_Soup;
 
+   procedure Set_Lock_Batch (Self : Encryptor; Mode : Integer) is
+      use Interfaces.C;
+      Status : int;
+   begin
+      Check_Open (Self);
+      Status := Itb.Sys.ITB_Easy_SetLockBatch (Self.Handle, int (Mode));
+      if Status /= 0 then
+         Itb.Errors.Raise_For (Integer (Status));
+      end if;
+   end Set_Lock_Batch;
+
    procedure Set_Lock_Seed (Self : Encryptor; Mode : Integer) is
       use Interfaces.C;
       Status : int;

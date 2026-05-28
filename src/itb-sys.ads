@@ -342,6 +342,12 @@ package Itb.Sys is
    function ITB_GetLockSoup return C_Int
    with Import => True, Convention => C, External_Name => "ITB_GetLockSoup";
 
+   function ITB_SetLockBatch (Mode : C_Int) return C_Int
+   with Import => True, Convention => C, External_Name => "ITB_SetLockBatch";
+
+   function ITB_GetLockBatch return C_Int
+   with Import => True, Convention => C, External_Name => "ITB_GetLockBatch";
+
    function ITB_SetMaxWorkers (N : C_Int) return C_Int
    with Import => True, Convention => C, External_Name => "ITB_SetMaxWorkers";
 
@@ -518,6 +524,10 @@ package Itb.Sys is
    function ITB_Easy_SetLockSoup (H : Handle; Mode : C_Int) return C_Int
    with Import => True, Convention => C,
         External_Name => "ITB_Easy_SetLockSoup";
+
+   function ITB_Easy_SetLockBatch (H : Handle; Mode : C_Int) return C_Int
+   with Import => True, Convention => C,
+        External_Name => "ITB_Easy_SetLockBatch";
 
    function ITB_Easy_SetLockSeed (H : Handle; Mode : C_Int) return C_Int
    with Import => True, Convention => C,

@@ -1,9 +1,8 @@
 --  Itb.Wrapper — format-deniability wrapper over the libitb wrap
 --  surface.
 --
---  Wraps an ITB ciphertext under one of three outer keystream ciphers
---  (AES-128-CTR / ChaCha20 (RFC8439) / SipHash-2-4 in CTR mode) so the
---  on-wire bytes carry no ITB-specific format pattern (W / H /
+--  Wraps an ITB ciphertext under one of outer keystream ciphers
+--  so the on-wire bytes carry no ITB-specific format pattern (W / H /
 --  container layout for Non-AEAD; 32-byte streamID prefix +
 --  per-chunk metadata for Streaming AEAD). The wrap exists for
 --  format-deniability ONLY — ITB already provides
@@ -22,7 +21,7 @@
 --        pragma Assert (Recovered = Blob);
 --     end;
 --
---  Single Message in-place mutation (zero-allocation steady state):
+--  Single Message in-place mutation (no output-buffer allocation):
 --
 --     declare
 --        N_Len     : constant Natural :=
@@ -75,26 +74,20 @@ package Itb.Wrapper is
    ---------------------------------------------------------------------
 
    --  Outer cipher selected per wrap session. Each variant maps to
-   --  one of the nine cipher-name strings the libitb FFI accepts:
-   --  "aescmac" / "chacha20" / "siphash24" / "areion256" / "areion512"
-   --  / "blake2b256" / "blake2b512" / "blake2s" / "blake3". The Go-side
-   --  constants are wrapper.CipherAES128CTR / wrapper.CipherChaCha20 /
-   --  wrapper.CipherSipHash24 and the matching wrapper.Cipher* values
-   --  for the remaining six.
+   --  one of cipher-name strings the libitb FFI accepts. The Go-side
+   --  constants are matching wrapper.Cipher* values.
    type Cipher_Type is
-     (Aes_128_Ctr, Cha_Cha_20, Sip_Hash_24,
-      Areion_256, Areion_512,
-      Blake_2b_256, Blake_2b_512, Blake_2s, Blake_3);
-
+     (Areion_256, Areion_512,
+      Blake_2b_256, Blake_2b_512, Blake_2s, Blake_3,
+      Aes_128_Ctr, Sip_Hash_24, Cha_Cha_20);
    --  Iteration order over every supported outer cipher.
    type Cipher_Array is array (Positive range <>) of Cipher_Type;
    All_Ciphers : constant Cipher_Array :=
-     [Areion_256, Areion_512, Sip_Hash_24, Aes_128_Ctr,
-      Blake_2b_256, Blake_2b_512, Blake_2s, Blake_3, Cha_Cha_20];
+     [Areion_256, Areion_512,
+      Blake_2b_256, Blake_2b_512, Blake_2s, Blake_3,
+      Aes_128_Ctr, Sip_Hash_24, Cha_Cha_20];
 
-   --  Returns the canonical FFI cipher-name string ("aescmac" / "chacha20"
-   --  / "siphash24" / "areion256" / "areion512" / "blake2b256" /
-   --  "blake2b512" / "blake2s" / "blake3") for the given Cipher_Type.
+   --  Returns the canonical FFI cipher-name string for the given Cipher_Type.
    --  Used at every libitb call site that takes a const char* cipherName
    --  argument.
    function Ffi_Name (C : Cipher_Type) return String;
@@ -104,11 +97,11 @@ package Itb.Wrapper is
    ---------------------------------------------------------------------
 
    --  Returns the byte length of the keystream-cipher key for the
-   --  named outer cipher (16 / 32 / 16 for AES / ChaCha / SipHash).
+   --  named outer cipher: 16/32/64.
    function Key_Size (C : Cipher_Type) return Natural;
 
    --  Returns the on-wire nonce length the named outer cipher emits
-   --  per stream (16 / 12 / 16 for AES / ChaCha / SipHash).
+   --  per stream 12 for ChaCha; 16 for other outer ciphers.
    function Nonce_Size (C : Cipher_Type) return Natural;
 
    --  Returns a fresh CSPRNG key sized for the named outer cipher.
@@ -128,9 +121,8 @@ package Itb.Wrapper is
    --  256-bit master matching an ML-KEM shared secret). The kdf layer
    --  truncates / stretches that master to the per-cipher key length
    --  internally, so a single 32-byte master keys every outer cipher.
-   --  Returns the derived key of length Key_Size(C) (16 / 32 / 16 for
-   --  AES / ChaCha / SipHash); raises an Itb_Error for a master
-   --  shorter than 32 bytes.
+   --  Returns the derived key of length Key_Size(C); raises an
+   --  Itb_Error for a master shorter than 32 bytes.
    function Derive_Key
      (C      : Cipher_Type;
       Master : Byte_Array) return Byte_Array;
@@ -142,8 +134,8 @@ package Itb.Wrapper is
    --  Seals one ITB ciphertext blob under C with a fresh CSPRNG
    --  nonce; returns the wire bytes nonce || keystream-XOR(blob).
    --  Allocates a fresh output buffer of size
-   --  Nonce_Size(C) + Blob'Length per call. For zero-allocation steady
-   --  state on the hot path use Wrap_In_Place.
+   --  Nonce_Size(C) + Blob'Length per call. For no output-buffer
+   --  allocation on the hot path use Wrap_In_Place.
    function Wrap
      (Cipher : Cipher_Type;
       Key    : Byte_Array;
@@ -153,7 +145,7 @@ package Itb.Wrapper is
    --  the per-stream nonce, XOR-decrypts the remainder under
    --  (Key, nonce), returns the recovered blob. Allocates a fresh
    --  output buffer of size Wire'Length - Nonce_Size(C) per call.
-   --  For zero-allocation steady state use Unwrap_In_Place.
+   --  For no output-buffer allocation use Unwrap_In_Place.
    function Unwrap
      (Cipher : Cipher_Type;
       Key    : Byte_Array;

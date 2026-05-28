@@ -1,16 +1,16 @@
 --  Easy Mode Single-Ouroboros benchmarks for the Ada binding.
 --
---  Mirrors the BenchmarkSingle* cohort from itb_ext_test.go for the
---  nine PRF-grade primitives, locked at 1024-bit ITB key width and 16
+--  Mirrors the BenchmarkSingle* cohort from itb_ext_test.go for
+--  PRF-grade primitives, locked at 1024-bit ITB key width and 16
 --  MiB CSPRNG-flavoured payload. One mixed-primitive variant
---  (Itb.Encryptor.Mixed_Single with BLAKE3 / BLAKE2s / BLAKE2b-256 +
---  Areion-SoEM-256 dedicated lockSeed) covers the Easy Mode Mixed
---  surface alongside the single-primitive grid.
+--  (Itb.Encryptor.Mixed_Single + dedicated lockSeed) covers the
+--  Easy Mode Mixed surface alongside the single-primitive grid.
 --
 --  Run with::
 --
 --      gprbuild -P itb_bench.gpr
 --      ./obj-bench/bench_single
+--      ITB_NONCE_BITS=512 ITB_LOCKSEED=1 ITB_LOCKBATCH=1 ./obj-bench/bench_single
 --      ITB_NONCE_BITS=512 ITB_LOCKSEED=1 ./obj-bench/bench_single
 --      ITB_BENCH_FILTER=blake3_encrypt ./obj-bench/bench_single
 --
@@ -22,17 +22,24 @@
 --  Limited_Controlled type; Ada cannot copy / aggregate / array-store
 --  it. The Rust / C# / Node.js sources keep one freshly-constructed
 --  encryptor per (primitive, op) tuple — 40 encryptors total. This
---  Ada port keeps one encryptor per primitive shape (10 total —
---  9 single-primitive + 1 mixed) and reuses it across the four ops
+--  Ada port keeps one encryptor per primitive shape and reuses it across the four ops
 --  (encrypt / decrypt / encrypt_auth / decrypt_auth). The cipher
 --  methods are stateless w.r.t. per-call carry on Easy Mode (fresh
 --  nonce per encrypt), so reusing one encryptor per primitive
 --  measures byte-for-byte the same per-call cost as a
 --  fresh-encryptor-per-op design. The 40 case names emitted to
 --  stdout still mirror the cross-binding canonical naming.
+--
+--  Lazy layout. The encryptors are still allocated at elaboration
+--  (they are small handles). The payload buffers (16 MiB each) are
+--  allocated and freed one primitive-shape at a time — four cases per
+--  primitive, four payloads live at once — so peak RSS is bounded to
+--  roughly 4 x 16 MiB rather than 40 x 16 MiB.
 
+with Ada.Streams;
 with Ada.Strings.Fixed;
 with Ada.Text_IO;
+with Ada.Unchecked_Deallocation;
 
 with Itb;
 with Itb.Encryptor;
@@ -41,7 +48,10 @@ with Common;
 
 procedure Bench_Single is
 
-   --  Canonical 9-primitive PRF-grade order, mirroring bench_single.rs
+   procedure Free_Bytes is new Ada.Unchecked_Deallocation
+     (Object => Itb.Byte_Array, Name => Common.Byte_Array_Access);
+
+   --  Canonical primitive PRF-grade order, mirroring bench_single.rs
    --  / bench_single.cs / bench-single.ts. The three below-spec lab
    --  primitives (CRC128, FNV-1a, MD5) are not exposed through the
    --  libitb registry and are therefore absent here by construction.
@@ -70,7 +80,7 @@ procedure Bench_Single is
 
    --  Mixed-primitive composition used by the bench_single_mixed_*
    --  cases. Noise / data / start cycle through the BLAKE family
-   --  while Areion-SoEM-256 takes the dedicated lockSeed slot — every
+   --  while Areion takes the dedicated lockSeed slot — every
    --  name resolves to a 256-bit native hash width so the
    --  Itb.Encryptor.Mixed_Single width-check passes.
    Mixed_Noise : constant String := "blake3";
@@ -78,7 +88,7 @@ procedure Bench_Single is
    Mixed_Start : constant String := "blake2b256";
 
    ---------------------------------------------------------------------
-   --  Encryptor pool — 10 encryptors total, one per primitive shape.
+   --  Encryptor pool — one per primitive shape.
    --  Each encryptor's lifetime spans the whole bench run; the
    --  finalizer releases the libitb handle at scope exit when main
    --  returns.
@@ -184,71 +194,140 @@ procedure Bench_Single is
       Chacha20_Name'Access,
       Mixed_Name'Access];
 
-   Cases : Common.Bench_Case_Array (1 .. 40);
+   --  Case names only (no payloads yet). Indexed parallel to
+   --  Encryptors / Encryptor_Tags: row I covers cases (4*I-3) .. 4*I.
+   type Op_Name_Quad is array (1 .. 4) of Common.String_Access;
+   type Name_Table   is array (1 .. 10) of Op_Name_Quad;
 
    Nonce_Bits : constant Integer := Common.Env_Nonce_Bits (128);
 
-   procedure Populate_Cases is
-      Kb_Img : constant String :=
+   --  Build the 40 case names (no allocs beyond the name strings).
+   function Build_Name_Table return Name_Table is
+      T   : Name_Table;
+      Kb  : constant String :=
         Ada.Strings.Fixed.Trim
           (Integer'Image (Common.Key_Bits), Ada.Strings.Both);
-      Slot   : Positive := 1;
    begin
-      for I in Encryptors'Range loop
+      for I in 1 .. 10 loop
          declare
-            Tag  : constant String := Encryptor_Tags (I).all;
-            Enc  : constant Common.Encryptor_Access := Encryptors (I);
             Base : constant String :=
-              "bench_single_" & Tag & "_" & Kb_Img & "bit";
-            P_E : constant Common.Byte_Array_Access :=
-              new Itb.Byte_Array'(Common.Random_Bytes (Common.Payload_16MB));
-            P_D : constant Common.Byte_Array_Access :=
-              new Itb.Byte_Array'(Common.Random_Bytes (Common.Payload_16MB));
-            P_A : constant Common.Byte_Array_Access :=
-              new Itb.Byte_Array'(Common.Random_Bytes (Common.Payload_16MB));
-            P_R : constant Common.Byte_Array_Access :=
-              new Itb.Byte_Array'(Common.Random_Bytes (Common.Payload_16MB));
-            C_D : constant Common.Byte_Array_Access :=
-              new Itb.Byte_Array'(Itb.Encryptor.Encrypt (Enc.all, P_D.all));
-            C_R : constant Common.Byte_Array_Access :=
-              new Itb.Byte_Array'
-                    (Itb.Encryptor.Encrypt_Auth (Enc.all, P_R.all));
+              "bench_single_" & Encryptor_Tags (I).all & "_" & Kb & "bit";
          begin
-            Cases (Slot) :=
-              (Name          => new String'(Base & "_encrypt_16mb"),
-               Enc           => Enc,
-               Payload       => P_E,
-               Cipher        => null,
-               Op            => Common.Op_Encrypt,
-               Payload_Bytes => Common.Payload_16MB);
-            Slot := Slot + 1;
-            Cases (Slot) :=
-              (Name          => new String'(Base & "_decrypt_16mb"),
-               Enc           => Enc,
-               Payload       => P_D,
-               Cipher        => C_D,
-               Op            => Common.Op_Decrypt,
-               Payload_Bytes => Common.Payload_16MB);
-            Slot := Slot + 1;
-            Cases (Slot) :=
-              (Name          => new String'(Base & "_encrypt_auth_16mb"),
-               Enc           => Enc,
-               Payload       => P_A,
-               Cipher        => null,
-               Op            => Common.Op_Encrypt_Auth,
-               Payload_Bytes => Common.Payload_16MB);
-            Slot := Slot + 1;
-            Cases (Slot) :=
-              (Name          => new String'(Base & "_decrypt_auth_16mb"),
-               Enc           => Enc,
-               Payload       => P_R,
-               Cipher        => C_R,
-               Op            => Common.Op_Decrypt_Auth,
-               Payload_Bytes => Common.Payload_16MB);
-            Slot := Slot + 1;
+            T (I) (1) := new String'(Base & "_encrypt_16mb");
+            T (I) (2) := new String'(Base & "_decrypt_16mb");
+            T (I) (3) := new String'(Base & "_encrypt_auth_16mb");
+            T (I) (4) := new String'(Base & "_decrypt_auth_16mb");
          end;
       end loop;
-   end Populate_Cases;
+      return T;
+   end Build_Name_Table;
+
+   Names : constant Name_Table := Build_Name_Table;
+
+   --  True when name passes the optional ITB_BENCH_FILTER substring test.
+   function Passes_Filter (Name : String) return Boolean is
+      Filter_On : constant Boolean := Common.Env_Filter_Set;
+      Filter    : constant String  := Common.Env_Filter;
+   begin
+      if not Filter_On then
+         return True;
+      end if;
+      --  Substring containment.
+      if Filter'Length = 0 then
+         return True;
+      end if;
+      if Name'Length < Filter'Length then
+         return False;
+      end if;
+      for I in Name'First .. Name'Last - Filter'Length + 1 loop
+         if Name (I .. I + Filter'Length - 1) = Filter then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Passes_Filter;
+
+   --  Count how many of the 40 cases pass the filter.
+   function Count_Selected return Natural is
+      N : Natural := 0;
+   begin
+      for I in 1 .. 10 loop
+         for J in 1 .. 4 loop
+            if Passes_Filter (Names (I) (J).all) then
+               N := N + 1;
+            end if;
+         end loop;
+      end loop;
+      return N;
+   end Count_Selected;
+
+   --  Run one primitive's four cases: allocate payloads, build and
+   --  measure each selected case, then free the payloads.
+   procedure Run_Primitive_Cases
+     (Enc         : Common.Encryptor_Access;
+      Case_Names  : Op_Name_Quad;
+      Min_Seconds : Float)
+   is
+      --  Allocate four independent payloads — one per op — so that the
+      --  decrypt-side pre-encryption does not share state with the
+      --  encrypt-side payload.
+      P_E : Common.Byte_Array_Access :=
+        new Itb.Byte_Array'(Common.Random_Bytes (Common.Payload_16MB));
+      P_D : Common.Byte_Array_Access :=
+        new Itb.Byte_Array'(Common.Random_Bytes (Common.Payload_16MB));
+      P_A : Common.Byte_Array_Access :=
+        new Itb.Byte_Array'(Common.Random_Bytes (Common.Payload_16MB));
+      P_R : Common.Byte_Array_Access :=
+        new Itb.Byte_Array'(Common.Random_Bytes (Common.Payload_16MB));
+      C_D : Common.Byte_Array_Access :=
+        new Itb.Byte_Array'(Itb.Encryptor.Encrypt (Enc.all, P_D.all));
+      C_R : Common.Byte_Array_Access :=
+        new Itb.Byte_Array'
+              (Itb.Encryptor.Encrypt_Auth (Enc.all, P_R.all));
+
+      Ops : constant array (1 .. 4) of Common.Bench_Case :=
+        [(Name          => Case_Names (1),
+          Enc           => Enc,
+          Payload       => P_E,
+          Cipher        => null,
+          Op            => Common.Op_Encrypt,
+          Payload_Bytes => Common.Payload_16MB),
+         (Name          => Case_Names (2),
+          Enc           => Enc,
+          Payload       => P_D,
+          Cipher        => C_D,
+          Op            => Common.Op_Decrypt,
+          Payload_Bytes => Common.Payload_16MB),
+         (Name          => Case_Names (3),
+          Enc           => Enc,
+          Payload       => P_A,
+          Cipher        => null,
+          Op            => Common.Op_Encrypt_Auth,
+          Payload_Bytes => Common.Payload_16MB),
+         (Name          => Case_Names (4),
+          Enc           => Enc,
+          Payload       => P_R,
+          Cipher        => C_R,
+          Op            => Common.Op_Decrypt_Auth,
+          Payload_Bytes => Common.Payload_16MB)];
+   begin
+      for K in Ops'Range loop
+         if Passes_Filter (Ops (K).Name.all) then
+            Common.Measure_One (Ops (K), Min_Seconds);
+         end if;
+      end loop;
+      --  Free all payload / ciphertext buffers for this primitive
+      --  before advancing to the next.
+      Free_Bytes (P_E);
+      Free_Bytes (P_D);
+      Free_Bytes (P_A);
+      Free_Bytes (P_R);
+      Free_Bytes (C_D);
+      Free_Bytes (C_R);
+   end Run_Primitive_Cases;
+
+   Selected    : constant Natural := Count_Selected;
+   Min_Seconds : constant Float   := Common.Env_Min_Seconds;
 
 begin
    Itb.Set_Max_Workers (0);
@@ -271,6 +350,18 @@ begin
       Common.Apply_Lock_Seed_If_Requested (Enc_Aescmac);
       Common.Apply_Lock_Seed_If_Requested (Enc_Siphash24);
       Common.Apply_Lock_Seed_If_Requested (Enc_Chacha20);
+
+      --  ITB_LOCKBATCH layers the Lock Batch performance mode on top;
+      --  inert unless Lock Soup is engaged via the lockSeed flag above.
+      Common.Apply_Lock_Batch_If_Requested (Enc_Areion256);
+      Common.Apply_Lock_Batch_If_Requested (Enc_Areion512);
+      Common.Apply_Lock_Batch_If_Requested (Enc_Blake2b256);
+      Common.Apply_Lock_Batch_If_Requested (Enc_Blake2b512);
+      Common.Apply_Lock_Batch_If_Requested (Enc_Blake2s);
+      Common.Apply_Lock_Batch_If_Requested (Enc_Blake3);
+      Common.Apply_Lock_Batch_If_Requested (Enc_Aescmac);
+      Common.Apply_Lock_Batch_If_Requested (Enc_Siphash24);
+      Common.Apply_Lock_Batch_If_Requested (Enc_Chacha20);
    end if;
 
    declare
@@ -295,6 +386,34 @@ begin
          & " workers=auto");
    end;
 
-   Populate_Cases;
-   Common.Run_All (Cases);
+   if Selected = 0 then
+      Ada.Text_IO.Put_Line
+        (Ada.Text_IO.Standard_Error,
+         "no bench cases match filter """ & Common.Env_Filter & """");
+      return;
+   end if;
+
+   declare
+      Min_S_Img : constant String :=
+        Ada.Strings.Fixed.Trim
+          (Integer'Image (Integer (Min_Seconds)), Ada.Strings.Both);
+      Sel_Img   : constant String :=
+        Ada.Strings.Fixed.Trim
+          (Natural'Image (Selected), Ada.Strings.Both);
+      Pay_Img   : constant String :=
+        Ada.Strings.Fixed.Trim
+          (Ada.Streams.Stream_Element_Offset'Image (Common.Payload_16MB),
+           Ada.Strings.Both);
+   begin
+      Ada.Text_IO.Put_Line
+        ("# benchmarks=" & Sel_Img
+         & " payload_bytes=" & Pay_Img
+         & " min_seconds=" & Min_S_Img);
+   end;
+
+   --  Lazy primitive-major loop: allocate / measure / free four payloads
+   --  per encryptor rather than 40 upfront.
+   for I in Encryptors'Range loop
+      Run_Primitive_Cases (Encryptors (I), Names (I), Min_Seconds);
+   end loop;
 end Bench_Single;

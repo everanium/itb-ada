@@ -116,8 +116,8 @@ package Itb.Encryptor is
    ---------------------------------------------------------------------
 
    --  Single-primitive constructor. Primitive is a canonical hash name
-   --  from Itb.List_Hashes ("areion256", "areion512", "siphash24",
-   --  "aescmac", "blake2b256", "blake2b512", "blake2s", "blake3",
+   --  from Itb.List_Hashes ("areion256", "areion512", "blake2b256",
+   --  "blake2b512", "blake2s", "blake3", "aescmac", "siphash24",
    --  "chacha20"). Key_Bits is the ITB key width in bits (512, 1024,
    --  2048; multiple of the primitive's native digest width).
    --
@@ -227,6 +227,10 @@ package Itb.Encryptor is
    --  this encryptor (always, both Single and Triple Ouroboros
    --  modes — Lock Soup layers on top of bit soup).
    procedure Set_Lock_Soup (Self : Encryptor; Mode : Integer);
+
+   --  0 = off (default); non-zero = on. Per-chunk PRF batching for the
+   --  Lock Soup overlay; inert unless Lock Soup is engaged.
+   procedure Set_Lock_Batch (Self : Encryptor; Mode : Integer);
 
    --  0 = off; 1 = on (allocates a dedicated lockSeed and routes the
    --  bit-permutation overlay through it; auto-couples Lock_Soup = 1

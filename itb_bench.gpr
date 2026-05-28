@@ -10,8 +10,10 @@
 --
 --      gprbuild -P itb_bench.gpr
 --      ITB_BENCH_MIN_SEC=5 ./obj-bench/bench_single
+--      ITB_BENCH_MIN_SEC=5 ITB_LOCKSEED=1 ITB_LOCKBATCH=1 ./obj-bench/bench_single
 --      ITB_BENCH_MIN_SEC=5 ITB_LOCKSEED=1 ./obj-bench/bench_single
 --      ITB_BENCH_MIN_SEC=5 ./obj-bench/bench_triple
+--      ITB_BENCH_MIN_SEC=5 ITB_LOCKSEED=1 ITB_LOCKBATCH=1 ./obj-bench/bench_triple
 --      ITB_BENCH_MIN_SEC=5 ITB_LOCKSEED=1 ./obj-bench/bench_triple
 
 with "itb";

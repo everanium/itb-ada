@@ -24,7 +24,7 @@ package body Itb.Wrapper is
    --  exposes a Mersenne Twister suitable for non-cryptographic test
    --  fixtures and key-distribution helpers; the wrapper key is
    --  delivered to the caller as opaque bytes for use against the
-   --  libitb-side AES / ChaCha / SipHash keystream — the per-stream
+   --  libitb-side keystream — the per-stream
    --  CSPRNG nonce that closes the security argument is drawn on the
    --  Go side at every Wrap / WrapInPlace / WrapStreamWriter_Init
    --  call from crypto/rand. Production deployments are expected to
@@ -47,54 +47,43 @@ package body Itb.Wrapper is
    end Seed_Rng;
 
    --  Returns the canonical FFI cipher-name string. Ada-side enum
-   --  → libitb-side const-char* roundtrip. These nine literal
+   --  → libitb-side const-char* roundtrip. These literal
    --  constants must remain bit-identical to the Go-side
-   --  wrapper.CipherAES128CTR / wrapper.CipherChaCha20 /
-   --  wrapper.CipherSipHash24 string values and the matching
-   --  wrapper.Cipher* values for the remaining six.
+   --  wrapper.Cipher* string values.
    function Ffi_Name (C : Cipher_Type) return String is
    begin
       case C is
-         when Aes_128_Ctr => return "aescmac";
-         when Cha_Cha_20  => return "chacha20";
-         when Sip_Hash_24 => return "siphash24";
          when Areion_256  => return "areion256";
          when Areion_512  => return "areion512";
          when Blake_2b_256 => return "blake2b256";
          when Blake_2b_512 => return "blake2b512";
          when Blake_2s    => return "blake2s";
          when Blake_3     => return "blake3";
+         when Aes_128_Ctr => return "aescmac";
+         when Sip_Hash_24 => return "siphash24";
+         when Cha_Cha_20  => return "chacha20";
       end case;
    end Ffi_Name;
 
-   --  Nine NUL-terminated cipher-name strings preallocated at
+   --  NUL-terminated cipher-name strings preallocated at
    --  package elaboration. These persist for the program lifetime
    --  and avoid the per-call Strings.New_String / Strings.Free
    --  bracket — leaks across an exception-raising path are then
    --  structurally impossible.
-   Cipher_Names_Aes  : aliased Interfaces.C.char_array := Interfaces.C.To_C ("aescmac", True);
-   Cipher_Names_Cha  : aliased Interfaces.C.char_array := Interfaces.C.To_C ("chacha20", True);
-   Cipher_Names_Sip  : aliased Interfaces.C.char_array := Interfaces.C.To_C ("siphash24", True);
    Cipher_Names_A256 : aliased Interfaces.C.char_array := Interfaces.C.To_C ("areion256", True);
    Cipher_Names_A512 : aliased Interfaces.C.char_array := Interfaces.C.To_C ("areion512", True);
    Cipher_Names_B2b256 : aliased Interfaces.C.char_array := Interfaces.C.To_C ("blake2b256", True);
    Cipher_Names_B2b512 : aliased Interfaces.C.char_array := Interfaces.C.To_C ("blake2b512", True);
    Cipher_Names_B2s  : aliased Interfaces.C.char_array := Interfaces.C.To_C ("blake2s", True);
    Cipher_Names_B3   : aliased Interfaces.C.char_array := Interfaces.C.To_C ("blake3", True);
+   Cipher_Names_Aes  : aliased Interfaces.C.char_array := Interfaces.C.To_C ("aescmac", True);
+   Cipher_Names_Sip  : aliased Interfaces.C.char_array := Interfaces.C.To_C ("siphash24", True);
+   Cipher_Names_Cha  : aliased Interfaces.C.char_array := Interfaces.C.To_C ("chacha20", True);
 
    function Cipher_Name_Ptr
      (C : Cipher_Type) return Interfaces.C.Strings.chars_ptr is
    begin
       case C is
-         when Aes_128_Ctr =>
-            return Interfaces.C.Strings.To_Chars_Ptr
-                     (Cipher_Names_Aes'Unchecked_Access);
-         when Cha_Cha_20 =>
-            return Interfaces.C.Strings.To_Chars_Ptr
-                     (Cipher_Names_Cha'Unchecked_Access);
-         when Sip_Hash_24 =>
-            return Interfaces.C.Strings.To_Chars_Ptr
-                     (Cipher_Names_Sip'Unchecked_Access);
          when Areion_256 =>
             return Interfaces.C.Strings.To_Chars_Ptr
                      (Cipher_Names_A256'Unchecked_Access);
@@ -113,6 +102,15 @@ package body Itb.Wrapper is
          when Blake_3 =>
             return Interfaces.C.Strings.To_Chars_Ptr
                      (Cipher_Names_B3'Unchecked_Access);
+         when Aes_128_Ctr =>
+            return Interfaces.C.Strings.To_Chars_Ptr
+                     (Cipher_Names_Aes'Unchecked_Access);
+         when Sip_Hash_24 =>
+            return Interfaces.C.Strings.To_Chars_Ptr
+                     (Cipher_Names_Sip'Unchecked_Access);
+         when Cha_Cha_20 =>
+            return Interfaces.C.Strings.To_Chars_Ptr
+                     (Cipher_Names_Cha'Unchecked_Access);
       end case;
    end Cipher_Name_Ptr;
 

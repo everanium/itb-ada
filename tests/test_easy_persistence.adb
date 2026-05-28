@@ -39,12 +39,12 @@ procedure Test_Easy_Persistence is
    Canonical_Hashes : constant Width_Pair_Array :=
      [(Hash_Areion256'Access,  256),
       (Hash_Areion512'Access,  512),
-      (Hash_Siphash24'Access,  128),
-      (Hash_Aescmac'Access,    128),
       (Hash_Blake2b256'Access, 256),
       (Hash_Blake2b512'Access, 512),
       (Hash_Blake2s'Access,    256),
       (Hash_Blake3'Access,     256),
+      (Hash_Aescmac'Access,    128),
+      (Hash_Siphash24'Access,  128),
       (Hash_Chacha20'Access,   256)];
 
    type Int_Array is array (Positive range <>) of Integer;
@@ -55,12 +55,12 @@ procedure Test_Easy_Persistence is
    begin
       if    Name = "areion256"  then return 32;
       elsif Name = "areion512"  then return 64;
-      elsif Name = "siphash24"  then return 0;
-      elsif Name = "aescmac"    then return 16;
       elsif Name = "blake2b256" then return 32;
       elsif Name = "blake2b512" then return 64;
       elsif Name = "blake2s"    then return 32;
       elsif Name = "blake3"     then return 32;
+      elsif Name = "aescmac"    then return 16;
+      elsif Name = "siphash24"  then return 0;
       elsif Name = "chacha20"   then return 32;
       else
          raise Program_Error with "unknown hash " & Name;

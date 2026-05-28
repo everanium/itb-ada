@@ -174,7 +174,7 @@ default invocation iterates every test executable in `obj-tests/`.
 
 A custom Go-bench-style harness lives under `bench/` and covers the
 four ops (`Encrypt`, `Decrypt`, `Encrypt_Auth`, `Decrypt_Auth`)
-across the nine PRF-grade primitives plus one mixed-primitive
+across PRF-grade primitives plus one mixed-primitive
 variant for both Single and Triple Ouroboros at 1024-bit ITB key
 width and 16 MiB payload. See [`bench/README.md`](bench/README.md)
 for invocation / environment variables / output format and
@@ -521,6 +521,11 @@ begin
       Itb.Encryptor.Set_Lock_Soup    (Enc, 1);     --  optional Insane Interlocked Mode: per-chunk PRF-keyed
                                                    --  bit-permutation overlay on top of bit-soup;
                                                    --  auto-enabled for Single Ouroboros if Set_Bit_Soup (1) is on
+      Itb.Encryptor.Set_Lock_Batch   (Enc, 1);     --  Lock Batch is the performance Lock Soup mode: recommended
+                                                   --  in every case when the configured hash is PRF-grade, since
+                                                   --  security is preserved under the PRF assumption while
+                                                   --  throughput rises. Symmetric option - set identically on
+                                                   --  the encrypt and decrypt sides.
 
       --  Itb.Encryptor.Set_Lock_Seed (Enc, 1);    --  optional dedicated lockSeed for the bit-permutation
                                                    --  derivation channel - separates that PRF's keying
@@ -628,6 +633,7 @@ begin
       Itb.Encryptor.Set_Barrier_Fill (Dec, 4);
       Itb.Encryptor.Set_Bit_Soup     (Dec, 1);
       Itb.Encryptor.Set_Lock_Soup    (Dec, 1);
+      Itb.Encryptor.Set_Lock_Batch   (Dec, 1);     --  Recommended under the PRF assumption - the performance Lock Soup mode; symmetric, set on both sides.
 
       --  Restore PRF keys, seed components, MAC key, and the
       --  per-instance configuration overrides from the saved blob.
@@ -889,6 +895,11 @@ begin
                                 --  bit-permutation overlay on top of bit-soup;
                                 --  automatically enabled for Single Ouroboros if
                                 --  Itb.Set_Bit_Soup (1) is enabled or vice versa
+   Itb.Set_Lock_Batch    (1);   --  Lock Batch is the performance Lock Soup mode: recommended
+                                --  in every case when the configured hash is PRF-grade, since
+                                --  security is preserved under the PRF assumption while
+                                --  throughput rises. Symmetric option - set identically on
+                                --  the encrypt and decrypt sides.
 
    declare
       --  Three independent CSPRNG-keyed Areion-SoEM-512 seeds. Each
@@ -1174,13 +1185,7 @@ importer with `Itb.Errors.Itb_Blob_Mode_Mismatch_Error`.
 
 ## Hash primitives (Single / Triple)
 
-Names match the canonical `hashes/` registry. Listed below in the
-canonical primitive ordering used across ITB documentation —
-**AES-CMAC**, **SipHash-2-4**, **ChaCha20**, **Areion-SoEM-256**,
-**BLAKE2s**, **BLAKE3**, **BLAKE2b-256**, **BLAKE2b-512**,
-**Areion-SoEM-512** — the FFI names are `aescmac`, `siphash24`,
-`chacha20`, `areion256`, `blake2s`, `blake3`, `blake2b256`,
-`blake2b512`, `areion512`. Triple Ouroboros (3× security) takes
+Names match the canonical `hashes/` registry. Triple Ouroboros takes
 seven seeds (one shared `noiseSeed` plus three `dataSeed` and three
 `startSeed`) via `Itb.Cipher.Encrypt_Triple` /
 `Itb.Cipher.Decrypt_Triple` and the authenticated counterparts
@@ -1189,18 +1194,6 @@ seven seeds (one shared `noiseSeed` plus three `dataSeed` and three
 `Itb.Streams.Stream_Encryptor_Triple` / `Stream_Decryptor_Triple` /
 `Itb.Streams.Encrypt_Stream_Triple` /
 `Itb.Streams.Decrypt_Stream_Triple`.
-
-| Primitive | FFI name | Native width (bits) | Fixed key size (bytes) |
-|---|---|---|---|
-| **AES-CMAC** | `aescmac` | 128 | 16 |
-| **SipHash-2-4** | `siphash24` | 128 | 0 (no internal fixed key) |
-| **ChaCha20** | `chacha20` | 256 | 32 |
-| **Areion-SoEM-256** | `areion256` | 256 | 32 |
-| **BLAKE2s** | `blake2s` | 256 | 32 |
-| **BLAKE3** | `blake3` | 256 | 32 |
-| **BLAKE2b-256** | `blake2b256` | 256 | 32 |
-| **BLAKE2b-512** | `blake2b512` | 512 | 64 |
-| **Areion-SoEM-512** | `areion512` | 512 | 64 |
 
 SipHash-2-4 is the one primitive without an internal fixed key —
 its keying material is the seed components themselves. `Itb.Seed.
@@ -1238,6 +1231,7 @@ rather than crashing.
 | `Itb.Set_Barrier_Fill (N)` | 1, 2, 4, 8, 16, 32 | 1 |
 | `Itb.Set_Bit_Soup (Mode)` | 0 (off), non-zero (on) | 0 |
 | `Itb.Set_Lock_Soup (Mode)` | 0 (off), non-zero (on) | 0 |
+| `Itb.Set_Lock_Batch (Mode)` | 0 (off), non-zero (on) | 0 |
 
 Mutating these affects every `Encryptor` constructed AFTER the
 call; pre-existing `Encryptor` instances snapshot the configuration
@@ -1450,6 +1444,7 @@ configuration; sibling packages carry the rest.
 |---|---|
 | `procedure Set_Bit_Soup (Mode : Integer)` / `function Get_Bit_Soup return Integer` | Bit Soup mode toggle |
 | `procedure Set_Lock_Soup (Mode : Integer)` / `function Get_Lock_Soup return Integer` | Lock Soup mode toggle |
+| `procedure Set_Lock_Batch (Mode : Integer)` / `function Get_Lock_Batch return Integer` | Lock Batch mode toggle (performance variant of Lock Soup; recommended under the PRF assumption; symmetric; inert unless Lock Soup is engaged) |
 | `procedure Set_Max_Workers (N : Integer)` / `function Get_Max_Workers return Integer` | Worker pool cap |
 | `procedure Set_Nonce_Bits (N : Integer)` / `function Get_Nonce_Bits return Integer` | Nonce width (128 / 256 / 512) |
 | `procedure Set_Barrier_Fill (N : Integer)` / `function Get_Barrier_Fill return Integer` | Barrier-fill factor |
@@ -1482,7 +1477,7 @@ configuration; sibling packages carry the rest.
 | `function Make (Primitive : String; Key_Bits : Integer; MAC : String := ""; Mode : String := "single") return Encryptor` | Single-primitive constructor |
 | `function Mixed_Single (Primitives, Key_Bits, MAC) return Encryptor` / `function Mixed_Triple (...) return Encryptor` | Mixed-primitive Single / Triple |
 | `function Encrypt / Decrypt / Encrypt_Auth / Decrypt_Auth (Self, Buffer) return Byte_Array` | Cipher entry points |
-| `procedure Set_Nonce_Bits / Set_Barrier_Fill / Set_Bit_Soup / Set_Lock_Soup / Set_Lock_Seed / Set_Chunk_Size` | Per-instance setters |
+| `procedure Set_Nonce_Bits / Set_Barrier_Fill / Set_Bit_Soup / Set_Lock_Soup / Set_Lock_Batch / Set_Lock_Seed / Set_Chunk_Size` | Per-instance setters |
 | `function Primitive / Primitive_At / Key_Bits / Mode / MAC_Name / Seed_Count / Has_PRF_Keys / Is_Mixed / Nonce_Bits / Header_Size` | Accessors |
 | `function Get_Seed_Components / Get_PRF_Key / Get_MAC_Key (Self)` | Key-material accessors |
 | `function Parse_Chunk_Len (Self, Header)` | Per-instance chunk-length parser |
@@ -1518,7 +1513,7 @@ configuration; sibling packages carry the rest.
 
 | Subprogram | Purpose |
 |---|---|
-| `type Cipher_Type is (Aes_128_Ctr, Cha_Cha_20, Sip_Hash_24, Areion_256, Areion_512, Blake_2b_256, Blake_2b_512, Blake_2s, Blake_3)` | Cipher enum |
+| `type Cipher_Type is (Areion_256, Areion_512, Blake_2b_256, Blake_2b_512, Blake_2s, Blake_3, Aes_128_Ctr, Sip_Hash_24, Cha_Cha_20, etc...)` | Cipher enum |
 | `function Ffi_Name (C : Cipher_Type) return String` | Canonical FFI name |
 | `function Key_Size (C : Cipher_Type) return Natural` / `function Nonce_Size (C : Cipher_Type) return Natural` | Cipher dimension accessors |
 | `function Generate_Key (C : Cipher_Type) return Byte_Array` | CSPRNG-fresh wrapper key |
