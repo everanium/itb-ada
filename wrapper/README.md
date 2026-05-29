@@ -87,6 +87,13 @@ declare
    W : Itb.Wrapper.Wrap_Stream_Writer;
    Last : Stream_Element_Offset;
 begin
+   Itb.Encryptor.Set_Nonce_Bits   (Enc, 512);
+   Itb.Encryptor.Set_Barrier_Fill (Enc, 4);
+   Itb.Encryptor.Set_Bit_Soup     (Enc, 1);
+   Itb.Encryptor.Set_Lock_Soup    (Enc, 1);
+   Itb.Encryptor.Set_Lock_Batch   (Enc, 1);     --  Recommended under the PRF assumption,
+                                                --  the performance Lock Soup mode.
+                                                --  Symmetric, set on both sides.
    Itb.Wrapper.Initialize
      (W, Itb.Wrapper.Aes_128_Ctr, Outer_Key, Out_Nonce);
    --  Wire = Out_Nonce | keystream-XOR(Inner_Sink contents)
@@ -119,21 +126,31 @@ declare
      Itb.Encryptor.Make ("areion512", 2048);
    Outer_Key : constant Byte_Array :=
      Itb.Wrapper.Generate_Key (Itb.Wrapper.Aes_128_Ctr);
-   Encrypted : Byte_Array := Itb.Encryptor.Encrypt (Enc, Plaintext);
    N_Len : constant Stream_Element_Offset :=
      Stream_Element_Offset
        (Itb.Wrapper.Nonce_Size (Itb.Wrapper.Aes_128_Ctr));
    Out_Nonce : Byte_Array (1 .. N_Len);
 begin
-   --  Wrap respects immutability of Encrypted (allocates a fresh wire):
-   --     declare
-   --        Wire : constant Byte_Array :=
-   --          Itb.Wrapper.Wrap (Itb.Wrapper.Aes_128_Ctr,
-   --                            Outer_Key, Encrypted);
-   --     begin ... end;
-   Itb.Wrapper.Wrap_In_Place
-     (Itb.Wrapper.Aes_128_Ctr, Outer_Key, Encrypted, Out_Nonce);
-   --  Wire = Out_Nonce & Encrypted (now XORed in place)
+   Itb.Encryptor.Set_Nonce_Bits   (Enc, 512);
+   Itb.Encryptor.Set_Barrier_Fill (Enc, 4);
+   Itb.Encryptor.Set_Bit_Soup     (Enc, 1);
+   Itb.Encryptor.Set_Lock_Soup    (Enc, 1);
+   Itb.Encryptor.Set_Lock_Batch   (Enc, 1);     --  Recommended under the PRF assumption,
+                                                --  the performance Lock Soup mode.
+                                                --  Symmetric, set on both sides.
+   declare
+      Encrypted : Byte_Array := Itb.Encryptor.Encrypt (Enc, Plaintext);
+   begin
+      --  Wrap respects immutability of Encrypted (allocates a fresh wire):
+      --     declare
+      --        Wire : constant Byte_Array :=
+      --          Itb.Wrapper.Wrap (Itb.Wrapper.Aes_128_Ctr,
+      --                            Outer_Key, Encrypted);
+      --     begin ... end;
+      Itb.Wrapper.Wrap_In_Place
+        (Itb.Wrapper.Aes_128_Ctr, Outer_Key, Encrypted, Out_Nonce);
+      --  Wire = Out_Nonce & Encrypted (now XORed in place)
+   end;
 end;
 ```
 

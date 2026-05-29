@@ -521,11 +521,9 @@ begin
       Itb.Encryptor.Set_Lock_Soup    (Enc, 1);     --  optional Insane Interlocked Mode: per-chunk PRF-keyed
                                                    --  bit-permutation overlay on top of bit-soup;
                                                    --  auto-enabled for Single Ouroboros if Set_Bit_Soup (1) is on
-      Itb.Encryptor.Set_Lock_Batch   (Enc, 1);     --  Lock Batch is the performance Lock Soup mode: recommended
-                                                   --  in every case when the configured hash is PRF-grade, since
-                                                   --  security is preserved under the PRF assumption while
-                                                   --  throughput rises. Symmetric option - set identically on
-                                                   --  the encrypt and decrypt sides.
+      Itb.Encryptor.Set_Lock_Batch   (Enc, 1);     --  Recommended under the PRF assumption,
+                                                   --  the performance Lock Soup mode.
+                                                   --  Symmetric, set on both sides.
 
       --  Itb.Encryptor.Set_Lock_Seed (Enc, 1);    --  optional dedicated lockSeed for the bit-permutation
                                                    --  derivation channel - separates that PRF's keying
@@ -633,7 +631,9 @@ begin
       Itb.Encryptor.Set_Barrier_Fill (Dec, 4);
       Itb.Encryptor.Set_Bit_Soup     (Dec, 1);
       Itb.Encryptor.Set_Lock_Soup    (Dec, 1);
-      Itb.Encryptor.Set_Lock_Batch   (Dec, 1);     --  Recommended under the PRF assumption - the performance Lock Soup mode; symmetric, set on both sides.
+      Itb.Encryptor.Set_Lock_Batch   (Dec, 1);     --  Recommended under the PRF assumption,
+                                                   --  the performance Lock Soup mode.
+                                                   --  Symmetric, set on both sides.
 
       --  Restore PRF keys, seed components, MAC key, and the
       --  per-instance configuration overrides from the saved blob.
@@ -895,11 +895,9 @@ begin
                                 --  bit-permutation overlay on top of bit-soup;
                                 --  automatically enabled for Single Ouroboros if
                                 --  Itb.Set_Bit_Soup (1) is enabled or vice versa
-   Itb.Set_Lock_Batch    (1);   --  Lock Batch is the performance Lock Soup mode: recommended
-                                --  in every case when the configured hash is PRF-grade, since
-                                --  security is preserved under the PRF assumption while
-                                --  throughput rises. Symmetric option - set identically on
-                                --  the encrypt and decrypt sides.
+   Itb.Set_Lock_Batch    (1);   --  Recommended under the PRF assumption,
+                                --  the performance Lock Soup mode.
+                                --  Symmetric, set on both sides.
 
    declare
       --  Three independent CSPRNG-keyed Areion-SoEM-512 seeds. Each
