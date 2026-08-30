@@ -1,6 +1,6 @@
 name = "itb"
-description = "Ada binding to libitb, the ITB cryptographic library."
-version = "0.1.2-dev"
+description = "Ada thin-proxy binding to libitb, the ITB cryptographic library."
+version = "0.3.0"
 authors = ["everanium"]
 maintainers = ["a@encloud.asia"]
 maintainers-logins = ["everanium"]
@@ -23,6 +23,3 @@ gnat = ">=13"
 "*".style_checks = "no"
 "release".optimization = "performance"
 "validation".optimization = "performance"
-
-[[depends-on]]
-gnatprove = "^15.1.0"
