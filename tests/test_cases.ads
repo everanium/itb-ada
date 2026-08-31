@@ -43,4 +43,10 @@ package Test_Cases is
    --  builder).
    procedure Opts_Render;
 
+   --  Per-call constellation override via the typed
+   --  Set_Inner_Hashes helper: register a bare width-512 profile,
+   --  Init with an 8-entry constellation, round-trip a Single
+   --  Message.
+   procedure Opts_Inner_Hashes_Round_Trip;
+
 end Test_Cases;

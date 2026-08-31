@@ -33,6 +33,18 @@ package Itb.Opts is
    procedure Set_Parallax_Segment_Size (O : in out Opts; N : Integer);
    procedure Set_MAC_Name (O : in out Opts; Name : String);
    procedure Set_Inner_Hash (O : in out Opts; Name : String);
+
+   --  Per-call constellation override mirroring the Go-side
+   --  Opts.MixedHashes [8]string field: the 8 slot names are joined
+   --  into the "innerHashes" pass-through key in the slot order
+   --  [noise, lock, data1, data2, data3, start1, start2, start3]
+   --  and re-parsed by Go into the per-call MixedHashes vector.
+   --  Fail-fast validation surfaces at Init on the Go side; a typo'd
+   --  slot or width mismatch surfaces with an error naming the
+   --  offending slot. When both this and Set_Inner_Hash are set,
+   --  the mixed override wins on the Go side.
+   procedure Set_Inner_Hashes (O : in out Opts; Names : String);
+
    procedure Set_Outer_Cipher (O : in out Opts; Name : String);
 
    --  Comma-separated palette names, passed through opaquely

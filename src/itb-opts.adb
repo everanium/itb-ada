@@ -177,6 +177,15 @@ package body Itb.Opts is
    end Set_Inner_Hash;
 
    ----------------------
+   -- Set_Inner_Hashes --
+   ----------------------
+
+   procedure Set_Inner_Hashes (O : in out Opts; Names : String) is
+   begin
+      Set (O, "innerHashes", Names);
+   end Set_Inner_Hashes;
+
+   ----------------------
    -- Set_Outer_Cipher --
    ----------------------
 

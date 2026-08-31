@@ -52,6 +52,8 @@ begin
    Run ("rekey", Test_Cases.Rekey'Access);
    Run ("errors", Test_Cases.Errors'Access);
    Run ("opts", Test_Cases.Opts_Render'Access);
+   Run ("opts_inner_hashes",
+        Test_Cases.Opts_Inner_Hashes_Round_Trip'Access);
 
    Ada.Text_IO.Put_Line
      ("ran" & Ran'Image & " tests --"

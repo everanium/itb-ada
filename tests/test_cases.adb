@@ -662,6 +662,48 @@ package body Test_Cases is
       begin
          Check (Itb.Opts.Build (E) = "", "empty builder renders empty");
       end;
+
+      --  Typed setter for the per-call constellation override
+      --  ("innerHashes") renders as the same query-string key that
+      --  the raw escape hatch produces.
+      declare
+         H : Itb.Opts.Opts;
+      begin
+         H.Set_Inner_Hashes
+           ("blake3,blake2s,areion256,blake2b256,chacha20,"
+            & "blake3,blake2s,areion256");
+         Check
+           (Itb.Opts.Build (H) =
+              "innerHashes=blake3,blake2s,areion256,blake2b256,chacha20,"
+              & "blake3,blake2s,areion256",
+            "Set_Inner_Hashes renders innerHashes key");
+      end;
    end Opts_Render;
+
+   ---------------------------------
+   -- Opts_Inner_Hashes_Round_Trip --
+   ---------------------------------
+
+   procedure Opts_Inner_Hashes_Round_Trip is
+      --  Base profile is a shipped single-primitive width-512
+      --  Single Message profile; the per-call Set_Inner_Hashes
+      --  override rebinds all 8 slots to an alternate width-512
+      --  constellation for one Pipeline pair without touching the
+      --  shipped registry.
+      Profile_Name     : constant String := "singlemsg-triple-mac-v1";
+      Override         : Itb.Opts.Opts;
+      Sender, Receiver : Itb.Pipeline.Pipeline;
+      Plain            : constant Itb.Byte_Array :=
+        Itb.To_Byte_Array ("mixed-hashes typed override round trip");
+   begin
+      Override.Set_Inner_Hashes
+        ("areion512,blake2b512,areion512,blake2b512,"
+         & "areion512,blake2b512,areion512,blake2b512");
+      Sender.Init (Profile_Name, Override);
+      Receiver.Open (Profile_Name, Sender.Blob, Override);
+      Check_Eq
+        (Receiver.Decrypt_Message (Sender.Encrypt_Message (Plain)),
+         Plain, "Set_Inner_Hashes round trip");
+   end Opts_Inner_Hashes_Round_Trip;
 
 end Test_Cases;
