@@ -1,6 +1,6 @@
 name = "itb"
 description = "Ada thin-proxy binding to libitb, the ITB cryptographic library."
-version = "0.3.3"
+version = "0.3.4"
 authors = ["everanium"]
 maintainers = ["a@encloud.asia"]
 maintainers-logins = ["everanium"]
