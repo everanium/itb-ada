@@ -3,7 +3,11 @@
 --  stream_sticky.rs, stream_cancel.rs, rekey.rs, errors.rs, plus the
 --  opts.rs unit tests).
 
+with Ada.Calendar;
 with Ada.Streams;
+with Ada.Streams.Stream_IO;
+with Ada.Strings;
+with Ada.Strings.Fixed;
 
 with Interfaces;
 
@@ -170,8 +174,8 @@ package body Test_Cases is
         Itb.To_Byte_Array ("smoke round-trip payload");
    begin
       Sender.Init ("singlemsg-triple-mac-v1", O);
-      Check (Sender.Blob'Length > 0, "blob must be non-empty");
-      Receiver.Open ("singlemsg-triple-mac-v1", Sender.Blob, O);
+      Check (Sender.Save'Length > 0, "blob must be non-empty");
+      Receiver.Load (Sender.Save);
       declare
          Wire : constant Itb.Byte_Array := Sender.Encrypt_Message (Plain);
       begin
@@ -193,7 +197,7 @@ package body Test_Cases is
            [4 * 1024, 256 * 1024];
       begin
          Sender.Init (Profile, O);
-         Receiver.Open (Profile, Sender.Blob, O);
+         Receiver.Load (Sender.Save);
          for Size of Sizes loop
             declare
                Plain : constant Itb.Byte_Array :=
@@ -227,7 +231,7 @@ package body Test_Cases is
         new Itb.Byte_Array (1 .. 2 ** 20);
    begin
       Sender.Init ("streaming-aead-triple-mac-v1", O);
-      Receiver.Open ("streaming-aead-triple-mac-v1", Sender.Blob, O);
+      Receiver.Load (Sender.Save);
       Fill_Mod (Plain.all, 251);
       declare
          Wire : Itb.Byte_Array_Access :=
@@ -274,7 +278,7 @@ package body Test_Cases is
       --  Small chunk size so the 64 KiB payload spans many chunks.
       O.Set_Chunk_Size (4096);
       Sender.Init ("streaming-aead-triple-mac-v1", O);
-      Receiver.Open ("streaming-aead-triple-mac-v1", Sender.Blob, O);
+      Receiver.Load (Sender.Save);
       Fill_Mod (Plain, 241);
 
       --  Encrypt: 17-byte writes, then Finish + 23-byte drains.
@@ -349,7 +353,7 @@ package body Test_Cases is
       Probes           : constant := 32;
    begin
       Sender.Init ("streaming-aead-triple-mac-v1", O);
-      Receiver.Open ("streaming-aead-triple-mac-v1", Sender.Blob, O);
+      Receiver.Load (Sender.Save);
       Fill_Mod (Plain, 227);
       declare
          Base : constant Itb.Byte_Array :=
@@ -458,7 +462,7 @@ package body Test_Cases is
          Plain    : constant Itb.Byte_Array :=
            Itb.To_Byte_Array ("after cancel");
       begin
-         Receiver.Open ("streaming-aead-triple-mac-v1", Sender.Blob, O);
+         Receiver.Load (Sender.Save);
          Check_Eq
            (Receiver.Decrypt_Message (Sender.Encrypt_Message (Plain)),
             Plain, "round trip after cancelled session");
@@ -477,17 +481,18 @@ package body Test_Cases is
    begin
       Sender.Init ("singlemsg-triple-mac-v1", O);
       declare
-         Blob_Before : constant Itb.Byte_Array := Sender.Blob;
+         Blob_Before : constant Itb.Byte_Array := Sender.Save;
+         Rotated     : constant Itb.Byte_Array := Sender.Rekey (Perm, Wrap);
       begin
-         Sender.Rekey (Perm, Wrap);
-         Check (Sender.Blob /= Blob_Before, "rekey must refresh the blob");
+         Check (Rotated /= Blob_Before, "rekey must refresh the blob");
+         Check (Sender.Save = Rotated, "save must report the rotated blob");
       end;
       declare
          Receiver : Itb.Pipeline.Pipeline;
          Plain    : constant Itb.Byte_Array :=
            Itb.To_Byte_Array ("post-rekey payload");
       begin
-         Receiver.Open ("singlemsg-triple-mac-v1", Sender.Blob, O);
+         Receiver.Load (Sender.Save);
          Check_Eq
            (Receiver.Decrypt_Message (Sender.Encrypt_Message (Plain)),
             Plain, "post-rekey round trip");
@@ -501,7 +506,8 @@ package body Test_Cases is
    procedure Errors is
       O : Itb.Opts.Opts;
    begin
-      --  Unknown profile is Bad_Input with a diagnostic.
+      --  Unknown profile is Unknown_Profile with a diagnostic, on Init
+      --  and on Lookup alike.
       declare
          P   : Itb.Pipeline.Pipeline;
          Got : Integer := -1;
@@ -515,7 +521,30 @@ package body Test_Cases is
                Check (Itb.Error.Message (E)'Length > 0,
                       "diagnostic must be non-empty");
          end;
-         Check (Got = Itb.Status.Bad_Input, "unknown profile status");
+         Check (Got = Itb.Status.Unknown_Profile, "unknown profile status");
+         Got := -1;
+         begin
+            declare
+               J : constant String :=
+                 Itb.Pipeline.Lookup ("no-such-profile");
+               pragma Unreferenced (J);
+            begin
+               Check (False, "lookup of unknown profile must raise");
+            end;
+         exception
+            when E : Itb.Error.Itb_Error =>
+               Got := Itb.Error.Status_Code (E);
+         end;
+         Check (Got = Itb.Status.Unknown_Profile, "lookup unknown status");
+      end;
+
+      --  A negative maxWorkers opts value is clamped, not rejected.
+      declare
+         Neg : Itb.Opts.Opts;
+         P   : Itb.Pipeline.Pipeline;
+      begin
+         Neg.Set_Max_Workers (-1);
+         P.Init ("singlemsg-triple-mac-v1", Neg);
       end;
 
       --  Typoed opts key (lowercase s) — Go rejects unknown keys.
@@ -556,38 +585,70 @@ package body Test_Cases is
                Got := Itb.Error.Status_Code (E);
          end;
          Check (Got = Itb.Status.Triple_Closed, "closed Pipeline status");
+         Got := -1;
+         begin
+            declare
+               B : constant Itb.Byte_Array := P.Save;
+               pragma Unreferenced (B);
+            begin
+               Check (False, "save on closed Pipeline must raise");
+            end;
+         exception
+            when E : Itb.Error.Itb_Error =>
+               Got := Itb.Error.Status_Code (E);
+         end;
+         Check (Got = Itb.Status.Triple_Closed, "closed save status");
+         Got := -1;
+         begin
+            P.Max_Workers (2);
+            Check (False, "max_workers on closed Pipeline must raise");
+         exception
+            when E : Itb.Error.Itb_Error =>
+               Got := Itb.Error.Status_Code (E);
+         end;
+         Check (Got = Itb.Status.Triple_Closed, "closed max_workers status");
       end;
 
-      --  Register a mixed profile (8-entry width-256 innerHashes
-      --  constellation, layers off), round-trip it, then re-register
-      --  under the same name — distinct Profile_Exists status.
+      --  Register a mixed profile (8-entry width-256 hashes
+      --  constellation, layers off) from a profile JSON record,
+      --  round-trip it, read it back, then re-register under the same
+      --  name — distinct Profile_Exists status.
       declare
-         RO               : Itb.Opts.Opts;
+         RO : constant String :=
+           "{""mode"":""singlemsg-nomac"",""width"":256,"
+           & """hashes"":[""blake3"",""blake2s"",""areion256"","
+           & """blake2b256"",""chacha20"",""blake3"",""blake2s"","
+           & """areion256""],""keybits"":1024,"
+           & """wrapper"":false,""parallax"":false}";
          Sender, Receiver : Itb.Pipeline.Pipeline;
          Plain            : constant Itb.Byte_Array :=
            Itb.To_Byte_Array ("custom profile");
       begin
-         RO.Set ("mode", "singlemsg-nomac");
-         RO.Set ("width", "256");
-         RO.Set ("innerHashes",
-                 "blake3,blake2s,areion256,blake2b256,chacha20,"
-                 & "blake3,blake2s,areion256");
-         RO.Set ("keyBits", "1024");
-         RO.Set ("parallaxOn", "false");
-         RO.Set ("wrapperOn", "false");
-         Itb.Pipeline.Register_Profile ("ada-binding-test-mixed", RO);
+         Itb.Pipeline.Register ("ada-binding-test-mixed", RO);
 
          Sender.Init ("ada-binding-test-mixed", O);
-         Receiver.Open ("ada-binding-test-mixed", Sender.Blob, O);
+         Receiver.Load (Sender.Save);
          Check_Eq
            (Receiver.Decrypt_Message (Sender.Encrypt_Message (Plain)),
             Plain, "registered profile round trip");
 
          declare
+            Looked : constant String :=
+              Itb.Pipeline.Lookup ("ada-binding-test-mixed");
+         begin
+            Check (Ada.Strings.Fixed.Index
+                     (Looked, """name"":""ada-binding-test-mixed""") > 0,
+                   "lookup must carry the name");
+            Check (Ada.Strings.Fixed.Index
+                     (Looked, """hashes"":[""blake3"",""blake2s""") > 0,
+                   "lookup must carry the hashes");
+         end;
+
+         declare
             Got : Integer := -1;
          begin
             begin
-               Itb.Pipeline.Register_Profile ("ada-binding-test-mixed", RO);
+               Itb.Pipeline.Register ("ada-binding-test-mixed", RO);
                Check (False, "duplicate register must raise");
             exception
                when E : Itb.Error.Itb_Error =>
@@ -595,6 +656,24 @@ package body Test_Cases is
             end;
             Check (Got = Itb.Status.Profile_Exists,
                    "duplicate profile status");
+         end;
+
+         --  A non-empty name inside the record must equal the argument.
+         declare
+            Got : Integer := -1;
+         begin
+            begin
+               Itb.Pipeline.Register
+                 ("ada-binding-test-mismatch",
+                  "{""name"":""other"",""mode"":""singlemsg-nomac"","
+                  & """width"":512,""hash"":""areion512"",""keybits"":1024,"
+                  & """wrapper"":false,""parallax"":false}");
+               Check (False, "name mismatch register must raise");
+            exception
+               when E : Itb.Error.Itb_Error =>
+                  Got := Itb.Error.Status_Code (E);
+            end;
+            Check (Got = Itb.Status.Bad_Input, "name mismatch status");
          end;
       end;
 
@@ -700,10 +779,145 @@ package body Test_Cases is
         ("areion512,blake2b512,areion512,blake2b512,"
          & "areion512,blake2b512,areion512,blake2b512");
       Sender.Init (Profile_Name, Override);
-      Receiver.Open (Profile_Name, Sender.Blob, Override);
+      Receiver.Load (Sender.Save);
       Check_Eq
         (Receiver.Decrypt_Message (Sender.Encrypt_Message (Plain)),
          Plain, "Set_Inner_Hashes round trip");
    end Opts_Inner_Hashes_Round_Trip;
+
+   -------------
+   -- Persist --
+   -------------
+
+   procedure Persist is
+      O      : Itb.Opts.Opts;
+      Sender : Itb.Pipeline.Pipeline;
+      Plain  : constant Itb.Byte_Array :=
+        Itb.To_Byte_Array ("persist payload");
+      Perm   : constant Itb.Byte_Array (1 .. 32) := [others => 16#31#];
+      Wrap   : constant Itb.Byte_Array (1 .. 32) := [others => 16#32#];
+      Path   : constant String :=
+        "/tmp/itb-ada-persist-"
+        & Ada.Strings.Fixed.Trim
+            (Integer'Image
+               (Integer (Ada.Calendar.Seconds (Ada.Calendar.Clock))),
+             Ada.Strings.Left)
+        & ".blob";
+   begin
+      Sender.Init ("singlemsg-triple-mac-v1", O);
+
+      --  Save -> Load; Save is stable; Load retains the bytes.
+      declare
+         Blob     : constant Itb.Byte_Array := Sender.Save;
+         Receiver : Itb.Pipeline.Pipeline;
+      begin
+         Check (Sender.Save = Blob, "save must be stable");
+         Receiver.Load (Blob);
+         Check_Eq
+           (Receiver.Decrypt_Message (Sender.Encrypt_Message (Plain)),
+            Plain, "in-memory round trip");
+         Check (Receiver.Save = Blob, "load must retain the blob bytes");
+
+         --  Load with master overrides equals a sender Rekey.
+         declare
+            Rotated : Itb.Pipeline.Pipeline;
+         begin
+            Rotated.Load (Blob, Perm, Wrap);
+            Check (Rotated.Save /= Blob,
+                   "master overrides must rotate the blob");
+            Sender.Rekey (Perm, Wrap);
+            Check_Eq
+              (Rotated.Decrypt_Message (Sender.Encrypt_Message (Plain)),
+               Plain, "override round trip");
+         end;
+
+         --  Inspect equals Lookup for a shipped profile.
+         declare
+            Inspected : constant String := Itb.Pipeline.Inspect (Blob);
+            Looked    : constant String :=
+              Itb.Pipeline.Lookup ("singlemsg-triple-mac-v1");
+         begin
+            Check (Inspected = Looked, "inspect / lookup mismatch");
+            Check (Ada.Strings.Fixed.Index
+                     (Inspected, """name"":""singlemsg-triple-mac-v1""") > 0,
+                   "inspect must carry the name");
+            Check (Ada.Strings.Fixed.Index
+                     (Inspected, """mode"":""singlemsg-mac""") > 0,
+                   "inspect must carry the mode");
+         end;
+      end;
+
+      --  Inspect of garbage is Bad_Input.
+      declare
+         Got : Integer := -1;
+      begin
+         begin
+            declare
+               J : constant String :=
+                 Itb.Pipeline.Inspect (Itb.To_Byte_Array ("not a blob"));
+               pragma Unreferenced (J);
+            begin
+               Check (False, "inspect of garbage must raise");
+            end;
+         exception
+            when E : Itb.Error.Itb_Error =>
+               Got := Itb.Error.Status_Code (E);
+         end;
+         Check (Got = Itb.Status.Bad_Input, "inspect garbage status");
+      end;
+
+      --  Profiles lists the shipped catalogue as a JSON array.
+      declare
+         Names : constant String := Itb.Pipeline.Profiles;
+      begin
+         Check (Names'Length > 0 and then Names (Names'First) = '[',
+                "profiles must be a JSON array");
+         Check (Ada.Strings.Fixed.Index
+                  (Names, """singlemsg-triple-mac-v1""") > 0,
+                "profiles must list the shipped profile");
+      end;
+
+      --  Save_F -> Load_F on a temp file; a missing file is Bad_Input.
+      declare
+         Receiver : Itb.Pipeline.Pipeline;
+         F        : Ada.Streams.Stream_IO.File_Type;
+      begin
+         Sender.Save_F (Path);
+         Receiver.Load_F (Path);
+         Check_Eq
+           (Receiver.Decrypt_Message (Sender.Encrypt_Message (Plain)),
+            Plain, "on-disk round trip");
+         Ada.Streams.Stream_IO.Open
+           (F, Ada.Streams.Stream_IO.In_File, Path);
+         Ada.Streams.Stream_IO.Delete (F);
+      end;
+      declare
+         Receiver : Itb.Pipeline.Pipeline;
+         Got      : Integer := -1;
+      begin
+         begin
+            Receiver.Load_F (Path);
+            Check (False, "load_f of a missing file must raise");
+         exception
+            when E : Itb.Error.Itb_Error =>
+               Got := Itb.Error.Status_Code (E);
+         end;
+         Check (Got = Itb.Status.Bad_Input, "load_f missing status");
+      end;
+
+      --  Max_Workers clamps and round-trips.
+      Sender.Max_Workers (2);
+      Sender.Max_Workers (-1);
+      Sender.Max_Workers (100_000);
+      declare
+         Receiver : Itb.Pipeline.Pipeline;
+      begin
+         Receiver.Load (Sender.Save);
+         Receiver.Max_Workers (1);
+         Check_Eq
+           (Receiver.Decrypt_Message (Sender.Encrypt_Message (Plain)),
+            Plain, "workers round trip");
+      end;
+   end Persist;
 
 end Test_Cases;

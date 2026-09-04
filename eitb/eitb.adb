@@ -3,21 +3,20 @@
 --  Subcommands:
 --
 --    eitb version                                   library + binding versions
---    eitb hashes                                    shipped hash primitive roster
+--    eitb profiles                                  registered profile catalogue
 --    eitb encrypt <profile> <in-file> <out-file>    Single Message encrypt
 --    eitb decrypt <profile> <blob-hex> <in-file> <out-file>
 --
 --  `encrypt` prints the session blob to stderr as hex; feed that hex
---  back to `decrypt` on the receiving side.
+--  back to `decrypt` on the receiving side. `profiles` lists the
+--  registered profile catalogue one name per line; the profiles that
+--  carry a cipher surface are the ones `encrypt` / `decrypt` accept.
 
 with Ada.Command_Line;
 with Ada.Directories;
 with Ada.Exceptions;
 with Ada.Streams.Stream_IO;
 with Ada.Text_IO;
-
-with Interfaces.C;
-with System;
 
 with Itb;
 with Itb.Opts;
@@ -31,14 +30,14 @@ procedure Eitb is
 
    use type Ada.Streams.Stream_Element_Offset;
 
-   Binding_Version : constant String := "0.3.5";
+   Binding_Version : constant String := "0.4.1";
 
    Hex_Digits : constant String := "0123456789abcdef";
 
    procedure Usage is
    begin
       Put_Line (Standard_Error, "usage: eitb version");
-      Put_Line (Standard_Error, "       eitb hashes");
+      Put_Line (Standard_Error, "       eitb profiles");
       Put_Line (Standard_Error,
                 "       eitb encrypt <profile> <in-file> <out-file>");
       Put_Line (Standard_Error,
@@ -173,59 +172,30 @@ procedure Eitb is
       Put_Line ("itb-ada " & Binding_Version);
    end Cmd_Version;
 
-   ----------------
-   -- cmd_hashes --
-   ----------------
+   ------------------
+   -- cmd_profiles --
+   ------------------
 
-   --  Diagnostic registry iteration. The binding library deliberately
-   --  exposes no primitive enumeration; this CLI diagnostic imports
-   --  the three iteration symbols itself so the shipped roster can be
-   --  inspected from the shell.
-
-   function ITB_HashCount return Interfaces.C.int
-   with Import => True, Convention => C, External_Name => "ITB_HashCount";
-
-   function ITB_HashName
-     (I       : Interfaces.C.int;
-      Out_Buf : System.Address;
-      Cap     : Interfaces.C.size_t;
-      Out_Len : access Interfaces.C.size_t) return Interfaces.C.int
-   with Import => True, Convention => C, External_Name => "ITB_HashName";
-
-   function ITB_HashWidth (I : Interfaces.C.int) return Interfaces.C.int
-   with Import => True, Convention => C, External_Name => "ITB_HashWidth";
-
-   procedure Cmd_Hashes is
-      use Interfaces.C;
-      Count : constant int := ITB_HashCount;
+   --  Prints the registered profile catalogue one name per line in
+   --  the sorted order Itb.Pipeline.Profiles returns. The catalogue
+   --  arrives as a JSON array of strings; profile names are
+   --  restricted to [a-z0-9-], so each quoted run is one complete
+   --  name and no escape handling is needed.
+   procedure Cmd_Profiles is
+      JSON  : constant String := Itb.Pipeline.Profiles;
+      Start : Natural := 0;
    begin
-      for I in 0 .. Integer (Count) - 1 loop
-         declare
-            Buf     : aliased char_array (1 .. 128) := [others => nul];
-            Out_Len : aliased size_t := 0;
-            St      : constant int :=
-              ITB_HashName (int (I), Buf'Address, Buf'Length,
-                            Out_Len'Access);
-            Width   : constant int := ITB_HashWidth (int (I));
-         begin
-            if St /= 0 then
-               raise Program_Error
-                 with "ITB_HashName (" & I'Image & ") failed with status"
-                      & St'Image;
+      for I in JSON'Range loop
+         if JSON (I) = '"' then
+            if Start = 0 then
+               Start := I + 1;
+            else
+               Put_Line (JSON (Start .. I - 1));
+               Start := 0;
             end if;
-            declare
-               Name : constant String :=
-                 To_Ada (Buf (1 .. Out_Len - 1), Trim_Nul => False);
-               Tag  : String (1 .. 12) := [others => ' '];
-            begin
-               Tag (1 .. Natural'Min (12, Name'Length)) :=
-                 Name (Name'First
-                       .. Name'First + Natural'Min (12, Name'Length) - 1);
-               Put_Line (I'Image & "  " & Tag & Width'Image & " bits");
-            end;
-         end;
+         end if;
       end loop;
-   end Cmd_Hashes;
+   end Cmd_Profiles;
 
    -----------------
    -- cmd_encrypt --
@@ -246,7 +216,7 @@ procedure Eitb is
                new Itb.Byte_Array'(Pipe.Encrypt_Message (Plain.all)));
       begin
          Write_File (Out_File, Wire.all);
-         Put_Line (Standard_Error, Hex_Encode (Pipe.Blob));
+         Put_Line (Standard_Error, Hex_Encode (Pipe.Save));
          Put_Line
            ("encrypted " & In_File & " -> " & Out_File & " ("
             & Ada.Streams.Stream_Element_Offset'Image (Plain.all'Length)
@@ -263,13 +233,14 @@ procedure Eitb is
    -----------------
 
    procedure Cmd_Decrypt (Profile, Blob_Hex, In_File, Out_File : String) is
-      O    : Itb.Opts.Opts;
       Pipe : Itb.Pipeline.Pipeline;
       Blob : Itb.Byte_Array_Access := Hex_Decode (Blob_Hex);
       Wire : Itb.Byte_Array_Access := Read_File (In_File);
    begin
       Apply_Runtime_Caps;
-      Pipe.Open (Profile, Blob.all, O);
+      --  The profile shape travels inside the blob; the profile
+      --  argument only selects the Single Message or streaming pair.
+      Pipe.Load (Blob.all);
       declare
          Plain : Itb.Byte_Array_Access :=
            (if Is_Streaming_Profile (Profile) then
@@ -293,8 +264,8 @@ procedure Eitb is
 begin
    if Argument_Count = 1 and then Argument (1) = "version" then
       Cmd_Version;
-   elsif Argument_Count = 1 and then Argument (1) = "hashes" then
-      Cmd_Hashes;
+   elsif Argument_Count = 1 and then Argument (1) = "profiles" then
+      Cmd_Profiles;
    elsif Argument_Count = 4 and then Argument (1) = "encrypt" then
       Cmd_Encrypt (Argument (2), Argument (3), Argument (4));
    elsif Argument_Count = 5 and then Argument (1) = "decrypt" then

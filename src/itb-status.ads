@@ -1,8 +1,8 @@
 --  Itb.Status — numeric status codes mirrored from the libitb C ABI
 --  (cmd/cshared/internal/capi/errors.go). Numeric values are stable
---  across releases. The reserved block 11..17 (retired facade
---  sentinels) is intentionally unnamed here — Label reports it
---  generically.
+--  across releases. Codes 11..13 are the Triple blob-record /
+--  registry sentinels; the reserved block 14..17 is intentionally
+--  unnamed here — Label reports it generically.
 
 package Itb.Status is
 
@@ -19,6 +19,9 @@ package Itb.Status is
    Seed_Width_Mix       : constant Code := 8;
    Bad_MAC              : constant Code := 9;
    MAC_Failure          : constant Code := 10;
+   Blob_Malformed_Recipe    : constant Code := 11;
+   Recipe_Primitive_Unknown : constant Code := 12;
+   Unknown_Profile          : constant Code := 13;
    Blob_Mode_Mismatch   : constant Code := 19;
    Blob_Malformed       : constant Code := 20;
    Blob_Version_Too_New : constant Code := 21;

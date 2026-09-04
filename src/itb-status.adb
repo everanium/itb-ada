@@ -21,7 +21,11 @@ package body Itb.Status is
          when Bad_MAC              =>
             return "unknown MAC name or invalid MAC handle";
          when MAC_Failure          => return "MAC verification failed";
-         when 11 .. 17             => return "reserved status";
+         when Blob_Malformed_Recipe    => return "blob recipe malformed";
+         when Recipe_Primitive_Unknown =>
+            return "blob recipe names an unknown primitive";
+         when Unknown_Profile          => return "unknown profile name";
+         when 14 .. 17             => return "reserved status";
          when Blob_Mode_Mismatch   => return "blob mode mismatch";
          when Blob_Malformed       => return "malformed state blob";
          when Blob_Version_Too_New => return "blob version too new";

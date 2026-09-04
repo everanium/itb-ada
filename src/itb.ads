@@ -11,9 +11,10 @@
 --                  (cmd/cshared/internal/capi/errors.go).
 --    Itb.Error     Itb_Error exception + structured-payload accessors.
 --    Itb.Opts      URL-query builder for the opts pass-through string.
---    Itb.Pipeline  Triple Pipeline session — Init / Open / Rekey /
---                  Close, Single Message encrypt / decrypt, one-shot
---                  stream ciphers, profile registration.
+--    Itb.Pipeline  Triple Pipeline session — Init / Load / Save /
+--                  Rekey / Close, Single Message encrypt / decrypt,
+--                  one-shot stream ciphers, profile records
+--                  (Inspect / Register / Lookup / Profiles).
 --    Itb.Stream    Incremental stream sessions over an open Pipeline.
 --    Itb.Runtime   Library version string + Go runtime knobs.
 --
@@ -97,11 +98,9 @@ private
    with Import => True, Convention => C,
         External_Name => "ITB_Triple_Init";
 
-   function ITB_Triple_Open
-     (Profile         : System.Address;
-      Blob            : System.Address;
+   function ITB_Triple_Load
+     (Blob            : System.Address;
       Blob_Len        : Size_T;
-      Opts            : System.Address;
       Perm_Master     : System.Address;
       Perm_Master_Len : Size_T;
       Wrap_Master     : System.Address;
@@ -109,7 +108,47 @@ private
       Masters_Count   : Size_T;
       Out_Handle      : access Handle) return C_Int
    with Import => True, Convention => C,
-        External_Name => "ITB_Triple_Open";
+        External_Name => "ITB_Triple_Load";
+
+   function ITB_Triple_LoadF
+     (Path            : System.Address;
+      Perm_Master     : System.Address;
+      Perm_Master_Len : Size_T;
+      Wrap_Master     : System.Address;
+      Wrap_Master_Len : Size_T;
+      Masters_Count   : Size_T;
+      Out_Handle      : access Handle) return C_Int
+   with Import => True, Convention => C,
+        External_Name => "ITB_Triple_LoadF";
+
+   function ITB_Triple_Save
+     (H        : Handle;
+      Blob_Out : System.Address;
+      Blob_Cap : Size_T;
+      Blob_Len : access Size_T) return C_Int
+   with Import => True, Convention => C,
+        External_Name => "ITB_Triple_Save";
+
+   function ITB_Triple_SaveF
+     (H    : Handle;
+      Path : System.Address) return C_Int
+   with Import => True, Convention => C,
+        External_Name => "ITB_Triple_SaveF";
+
+   function ITB_Triple_Inspect
+     (Blob     : System.Address;
+      Blob_Len : Size_T;
+      JSON_Out : System.Address;
+      JSON_Cap : Size_T;
+      JSON_Len : access Size_T) return C_Int
+   with Import => True, Convention => C,
+        External_Name => "ITB_Triple_Inspect";
+
+   function ITB_Triple_MaxWorkers
+     (H : Handle;
+      N : C_Int) return C_Int
+   with Import => True, Convention => C,
+        External_Name => "ITB_Triple_MaxWorkers";
 
    function ITB_Triple_Rekey
      (H               : Handle;
@@ -171,11 +210,26 @@ private
    with Import => True, Convention => C,
         External_Name => "ITB_Triple_DecryptMessage";
 
-   function ITB_Triple_RegisterProfile
-     (Name : System.Address;
-      Opts : System.Address) return C_Int
+   function ITB_Triple_Register
+     (Name         : System.Address;
+      Profile_JSON : System.Address) return C_Int
    with Import => True, Convention => C,
-        External_Name => "ITB_Triple_RegisterProfile";
+        External_Name => "ITB_Triple_Register";
+
+   function ITB_Triple_Lookup
+     (Name     : System.Address;
+      JSON_Out : System.Address;
+      JSON_Cap : Size_T;
+      JSON_Len : access Size_T) return C_Int
+   with Import => True, Convention => C,
+        External_Name => "ITB_Triple_Lookup";
+
+   function ITB_Triple_Profiles
+     (JSON_Out : System.Address;
+      JSON_Cap : Size_T;
+      JSON_Len : access Size_T) return C_Int
+   with Import => True, Convention => C,
+        External_Name => "ITB_Triple_Profiles";
 
    function ITB_Triple_EncryptStreamBegin
      (Pipe       : Handle;

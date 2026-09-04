@@ -51,6 +51,7 @@ begin
    Run ("stream_cancel", Test_Cases.Stream_Cancel'Access);
    Run ("rekey", Test_Cases.Rekey'Access);
    Run ("errors", Test_Cases.Errors'Access);
+   Run ("persist", Test_Cases.Persist'Access);
    Run ("opts", Test_Cases.Opts_Render'Access);
    Run ("opts_inner_hashes",
         Test_Cases.Opts_Inner_Hashes_Round_Trip'Access);

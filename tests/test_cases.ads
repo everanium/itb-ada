@@ -5,7 +5,7 @@
 
 package Test_Cases is
 
-   --  Init -> blob -> Open -> Encrypt_Message -> Decrypt_Message
+   --  Init -> Save -> Load -> Encrypt_Message -> Decrypt_Message
    --  round trip.
    procedure Smoke;
 
@@ -31,13 +31,17 @@ package Test_Cases is
    --  the Pipeline usable.
    procedure Stream_Cancel;
 
-   --  Init -> Rekey -> Open receiver with the rotated blob -> round
+   --  Init -> Rekey -> Load receiver with the rotated blob -> round
    --  trip.
    procedure Rekey;
 
-   --  Error-mapping surface: opaque-string relay, closed Pipeline,
-   --  duplicate profile registration.
+   --  Error-mapping surface: opaque-string relay, unknown profile,
+   --  closed Pipeline, duplicate profile registration.
    procedure Errors;
+
+   --  Persistence surface: Save / Save_F / Load / Load_F round trips,
+   --  Inspect, Lookup / Profiles, Max_Workers.
+   procedure Persist;
 
    --  Opts builder rendering (typed setters, raw escape hatch, empty
    --  builder).

@@ -15,8 +15,8 @@ package Itb.Opts is
    type Opts is tagged private;
 
    --  Escape hatch appending a raw key=value pair. Covers every key
-   --  the Go side accepts, including the register-profile grammar
-   --  ("mode", "width", "innerHashes", "parallaxOn", "wrapperOn", ...).
+   --  the Go side accepts for Init overrides. Profile registration
+   --  takes a profile JSON record instead (see Itb.Pipeline.Register).
    procedure Set (O : in out Opts; Key : String; Value : String);
 
    --  Typed setters over the common keys. Each renders onto the same
