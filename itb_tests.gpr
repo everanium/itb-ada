@@ -1,0 +1,31 @@
+--  itb_tests.gpr — test driver for the Itb binding.
+--
+--  One driver executable (tests/test_driver.adb) runs every test
+--  procedure from tests/test_cases.adb and exits 0 on full pass /
+--  non-zero on any failure. The test roster mirrors the Rust
+--  reference suite (smoke, message, stream_pump, stream_incremental,
+--  stream_sticky, stream_cancel, rekey, errors, opts).
+--
+--  Run with:
+--
+--      alr exec -- gprbuild -P itb_tests.gpr
+--      ./run_tests.sh
+
+with "libitb3";
+
+project Itb_Tests is
+
+   for Source_Dirs use ("tests");
+   for Object_Dir use "obj-tests";
+   for Exec_Dir use "obj-tests";
+   for Main use ("test_driver.adb");
+
+   package Compiler renames Libitb3.Compiler;
+
+   package Linker renames Libitb3.Linker;
+
+   package Builder is
+      for Default_Switches ("Ada") use ("-j0");
+   end Builder;
+
+end Itb_Tests;

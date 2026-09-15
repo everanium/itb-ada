@@ -1,0 +1,28 @@
+--  itb_eitb.gpr — eitb CLI project for the Itb binding.
+--
+--  Builds the per-binding eitb demonstrator (version / hashes /
+--  encrypt / decrypt subcommands) into eitb/eitb.
+--
+--  Run with:
+--
+--      alr exec -- gprbuild -P itb_eitb.gpr
+--      ./eitb/eitb version
+--      ./eitb/eitb hashes
+
+with "libitb3";
+
+project Itb_Eitb is
+
+   for Source_Dirs use ("eitb");
+   for Object_Dir use "eitb/obj";
+   for Exec_Dir use "eitb";
+   for Main use ("eitb.adb");
+
+   package Compiler renames Libitb3.Compiler;
+   package Linker renames Libitb3.Linker;
+
+   package Builder is
+      for Default_Switches ("Ada") use ("-j0");
+   end Builder;
+
+end Itb_Eitb;

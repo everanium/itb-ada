@@ -1,0 +1,26 @@
+name = "libitb3"
+description = "ITB Symmetric Cipher Construction with Ambiguity-Based Security - Ada"
+version = "0.5.1"
+authors = ["Andrey Kuvshinov"]
+maintainers = ["Andrey Kuvshinov <andrew@encloud.blue>"]
+maintainers-logins = ["everanium"]
+licenses = "Apache-2.0"
+website = "https://github.com/everanium/itb"
+tags = ["cryptography", "encryption", "cipher", "symmetric", "aead"]
+
+# The wrapper sources have no Alire-managed dependencies. The only
+# runtime dependency is the libitb3 shared library distributed under
+# <repo>/dist/<os>-<arch>/libitb3.<ext>, located through compile-time
+# linker search paths and runtime rpath. The wrapper itself is pure
+# Ada 2022 + standard library.
+project-files = ["libitb3.gpr"]
+
+[[depends-on]]
+gnat = ">=13"
+
+[build-switches]
+"*".compile_checks = "warnings"
+"*".runtime_checks = "default"
+"*".style_checks = "no"
+"release".optimization = "performance"
+"validation".optimization = "performance"

@@ -1,0 +1,18 @@
+# Alire / GPRbuild build artefacts.
+obj/
+obj-tests/
+obj-bench/
+lib/
+
+# Ada Library Information files. gprbuild puts them under obj/ via the
+# .gpr config; leak into the binding root only when gnatprove or
+# `gcc -c -gnatc` is invoked without an explicit output dir.
+*.ali
+*.o
+
+# Alire local cache (synchronised toolchain references, lock files).
+alire/
+.alire/
+
+# Phase-1 verification scratch (deleted before final commit).
+scratch/

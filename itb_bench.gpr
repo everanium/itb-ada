@@ -1,0 +1,42 @@
+--  itb_bench.gpr — bench executables for the Itb binding.
+--
+--  bench/bench_message.adb, bench/bench_stream.adb, and
+--  bench/bench_stream_one_shot.adb are the three main entry points;
+--  bench/common.adb / common.ads provide the shared runner. Output
+--  is one fixed-width table row per case (bench / size / mb_per_sec),
+--  matching the C reference harness.
+--
+--  Run with:
+--
+--      alr exec -- gprbuild -P itb_bench.gpr
+--      ./run_bench.sh
+
+with "libitb3";
+
+project Itb_Bench is
+
+   for Source_Dirs use ("bench");
+   for Object_Dir use "obj-bench";
+   for Exec_Dir use "obj-bench";
+   for Main use
+     ("bench_message.adb",
+      "bench_stream.adb",
+      "bench_stream_one_shot.adb");
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022",
+         "-gnatwa",
+         "-gnatVa",
+         "-gnatwe",
+         "-O3",            --  Bench builds use -O3 for hot-path measurement.
+         "-g");
+   end Compiler;
+
+   package Linker renames Libitb3.Linker;
+
+   package Builder is
+      for Default_Switches ("Ada") use ("-j0");
+   end Builder;
+
+end Itb_Bench;
