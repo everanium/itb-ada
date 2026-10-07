@@ -1,4 +1,4 @@
---  Test_Support — shared assertion helper + payload generator for
+--  Shared assertion helper + payload generator for
 --  the Itb3 binding test suite.
 
 with Interfaces;

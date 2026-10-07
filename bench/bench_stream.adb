@@ -1,4 +1,4 @@
---  bench_stream — incremental stream-pump encrypt throughput vs
+--  Incremental stream-pump encrypt throughput vs
 --  plaintext size (Streaming Non-AEAD profile by default) at
 --  1 MiB / 16 MiB / 64 MiB. Each iteration opens a session, feeds
 --  the plaintext in 1 MiB slices, drains produced wire into an
@@ -27,8 +27,8 @@ procedure Bench_Stream is
    Pipe : Itb3.Pipeline.Pipeline;
 
 begin
-   --  Bench-scale allocation churn leaks Go scratch heap unboundedly
-   --  without a soft memory cap + aggressive GC.
+   --  Bench-scale allocation churn grows the Go scratch heap
+   --  unboundedly without a soft memory cap + aggressive GC.
    Itb3.Runtime.Set_Memory_Limit (4_294_967_296);  --  4 GiB soft cap
    Itb3.Runtime.Set_GC_Percent (100);
 

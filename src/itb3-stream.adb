@@ -1,4 +1,4 @@
---  Itb3.Stream body — thin relay onto the six session entry points.
+--  Thin relay onto the six session entry points.
 
 with Interfaces.C;
 

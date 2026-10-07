@@ -1,0 +1,34 @@
+--  loop stress harness project for the Itb binding.
+--
+--  Builds the long-run concurrency harness into loop/loop: one
+--  Pipeline handle per exercised cipher surface, hammered by a team
+--  of Ada tasks for minutes, with master rotation and blob reopen on
+--  a schedule.
+--
+--  Run with:
+--
+--      alr exec -- gprbuild -P itb_loop.gpr
+--      ./loop/loop --duration 2m --shape both
+--      ./loop/loop -h
+
+with "libitb3";
+
+project Itb_Loop is
+
+   for Source_Dirs use ("loop");
+   for Object_Dir use "loop/obj";
+   for Exec_Dir use "loop";
+   for Main use ("loop_main.adb");
+
+   package Compiler renames Libitb3.Compiler;
+   package Linker renames Libitb3.Linker;
+
+   package Builder is
+      for Default_Switches ("Ada") use ("-j0");
+      --  The executable keeps the fleet's name rather than the main
+      --  unit's, so bindings/<lang>/loop/loop is the same path in
+      --  every binding.
+      for Executable ("loop_main.adb") use "loop";
+   end Builder;
+
+end Itb_Loop;

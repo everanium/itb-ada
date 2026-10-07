@@ -13,7 +13,7 @@ in-repo layout. Every hash-name / MAC-name / cipher-name /
 profile-name is an opaque `String` passed through to Go for
 validation; the binding carries no ITB construction logic. The public
 surface is the `Itb.Pipeline.Pipeline` controlled type (Init / Load /
-Save / Rekey / Close, Single Message encrypt / decrypt, whole-buffer
+Save / Rekey / Close, Single Message encrypt / decrypt, one-shot
 stream ciphers, the profile-record entries Inspect / Register /
 Lookup / Profiles), incremental sessions in `Itb.Stream`, the
 `Itb.Opts.Opts` query-string builder for Init overrides, and the Go
@@ -124,6 +124,17 @@ The same rotation is available on the receiver side as a master
 override pair on `Load`: `Receiver.Load (Blob, Perm_Master,
 Wrap_Master)` reopens the blob with fresh masters folded in.
 
+For bounded-memory streaming, `Itb.Stream` exposes incremental
+sessions (`Begin_Encrypt` / `Begin_Decrypt`, then `Write` / `Finish`
+/ `Read` in a caller-driven loop); `Encrypt_Stream_One_Shot` /
+`Decrypt_Stream_One_Shot` cover callers holding the whole payload in
+memory.
+
+Profile names, opts keys, and every primitive name are validated by
+the Go side; a rejected string raises `Itb.Error.Itb_Error` carrying
+the status code plus the `ITB_LastError` diagnostic (decoded via
+`Itb.Error.Status_Code` / `Itb.Error.Message`).
+
 ## Persisting sessions
 
 The blob returned by `Save` is a self-describing session bundle: it
@@ -156,12 +167,10 @@ same name before opening. Attempting to `Load` such a blob through
 this binding raises `Itb_Error` with
 `Itb.Status.Recipe_Primitive_Unknown`.
 
-**Runtime tuning.** The worker cap is per-machine and never travels
-in the blob; the receiver may pick its own after `Load`:
-
-```ada
-Receiver.Max_Workers (4);   --  clamped by libitb3; <= 0 selects auto
-```
+**Runtime tuning.** `Receiver.Max_Workers (n)` sets the worker cap for
+every subsequent cipher call (`n <= 0` selects auto, `n > 256` is
+clamped to 256); the receiver may pick its own worker cap after
+`Load` — the cap is per-machine and never written to the blob.
 
 ## Profile registry
 
@@ -185,17 +194,6 @@ begin
    null;
 end;
 ```
-
-For bounded-memory streaming, `Itb.Stream` exposes incremental
-sessions (`Begin_Encrypt` / `Begin_Decrypt`, then `Write` / `Finish`
-/ `Read` in a caller-driven loop); `Encrypt_Stream_One_Shot` /
-`Decrypt_Stream_One_Shot` cover callers holding the whole payload in
-memory.
-
-Profile names, opts keys, and every primitive name are validated by
-the Go side; a rejected string raises `Itb.Error.Itb_Error` carrying
-the status code plus the `ITB_LastError` diagnostic (decoded via
-`Itb.Error.Status_Code` / `Itb.Error.Message`).
 
 ## Memory
 
@@ -239,12 +237,15 @@ checks; the deep suite lives in Go under the shipped tree.
 ./bindings/ada/run_bench.sh
 ```
 
-Runs `bench_message` (Single Message shape) and `bench_stream`
-(incremental stream-pump shape) at 1 MiB / 16 MiB / 64 MiB, one
+Runs `bench_message` (Single Message shape), `bench_stream`
+(incremental stream-pump shape) and `bench_stream_one_shot`
+(one-shot stream shape) at 1 MiB / 16 MiB / 64 MiB, one
 fixed-width table row per case. Defaults pin the canonical bench
 shape (`ITB_INNER_HASH=areion512`, `ITB_KEY_BITS=1024`,
 `ITB_NONCE_BITS=512`, parallax + wrapper off,
-`ITB_BENCH_MIN_SEC=5`); override via env vars before invocation.
+`ITB_BENCH_MIN_SEC=5`); override via env vars before invocation. See
+[`bindings/BENCH.md`](https://github.com/everanium/itb/blob/main/bindings/BENCH.md)
+for the fleet-wide configuration authority and comparison tables.
 
 ## itb3 CLI
 
@@ -256,6 +257,26 @@ payloads directly on disk (`-i` / `-o`) or through stdin / stdout,
 rotates outer masters, and inspects stored blobs. See
 [`cmd/itb3/README.md`](https://github.com/everanium/itb/blob/main/cmd/itb3/README.md) for the full
 subcommand reference.
+
+## loop utility
+
+A long-run stress harness under `bindings/ada/loop/` holds one
+Pipeline handle for minutes, cycles encrypt → decrypt → compare
+round-trips through it, rotates the outer masters and reopens the
+handle from its session blob on a schedule, and reports whether the
+process survived with every byte intact. It is the binding-side
+counterpart of the Go harness under `tools/loop`: same flags, same
+round structure, same summary in both renderings.
+
+```bash
+cd bindings/ada && ./build.sh
+./run_loop.sh --duration 2m --shape both
+```
+
+`./loop/loop -h` lists every flag. Concurrency mode:
+**shared-handle** — Ada tasks call into one Pipeline handle
+concurrently, which libitb3 permits once the handle is constructed,
+so `--goroutines` is the task count verbatim.
 
 ## eitb utility
 
@@ -285,6 +306,14 @@ pair.
   diagnostic attached to an `Itb_Error` occurrence may belong to a
   different call under concurrent FFI use. The status code is always
   attributable.
+- GNAT bounds `Ada.Exceptions.Exception_Message`, so a long
+  diagnostic read back with `Message (E)` arrives truncated.
+  `Itb3.Error.Last_Error` is not bounded — it asks the library for the
+  required length and reads the whole sentence. A rejected primitive
+  name of 1200 characters produces a 1334-character diagnostic, which
+  `Last_Error` returns in full and identically to the C binding. Read
+  it for the full text; the status code on the occurrence is
+  unaffected either way.
 - `Rekey` must not run concurrently with cipher calls or open stream
   sessions on the same `Pipeline`.
 - A stream session borrows its parent `Pipeline` by handle only; the

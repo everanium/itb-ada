@@ -1,4 +1,4 @@
---  Itb3.Pipeline — Triple Pipeline session over a libitb3 handle.
+--  Triple Pipeline session over a libitb3 handle.
 --
 --  A Pipeline is Init'ed fresh against a named profile or Load'ed
 --  from a session-bundle blob produced by Save / Rekey. All cipher
@@ -70,7 +70,7 @@ package Itb3.Pipeline is
    --  Sets the worker cap for every subsequent cipher call. N is
    --  clamped by libitb3 (<= 0 selects auto, > 256 becomes 256); only
    --  the handle state is reported. The cap is per-machine and never
-   --  travels in the blob.
+   --  written to the blob.
    procedure Max_Workers (P : Pipeline; N : Integer);
 
    --  Rotates the parallax + wrapper masters; the fresh blob is
@@ -138,6 +138,11 @@ package Itb3.Pipeline is
    --  The raw libitb3 handle — internal, used by Itb3.Stream to open
    --  sessions against this Pipeline.
    function Raw (P : Pipeline) return Handle;
+
+   --  The shipped hash-primitive registry in canonical order, as a
+   --  JSON array of strings. The registry is the authority on which
+   --  names Init accepts for the "innerHash" opts key.
+   function Hash_Names return String;
 
 private
 

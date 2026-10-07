@@ -1,4 +1,4 @@
---  Test_Cases — binding test roster mirroring the Rust reference
+--  Binding test roster mirroring the Rust reference
 --  suite (bindings/rust/tests). Each procedure raises
 --  Test_Support.Test_Failure (or propagates Itb3.Error.Itb_Error) on
 --  failure; the driver reports PASS / FAIL per procedure.
@@ -46,6 +46,13 @@ package Test_Cases is
    --  Opts builder rendering (typed setters, raw escape hatch, empty
    --  builder).
    procedure Opts_Render;
+
+   --  Go runtime knobs, the hash-registry enumeration and the auto
+   --  DRBG tier report: the setters report through their query forms,
+   --  the heap profile reaches the file system, the pool counters come
+   --  back at the length the library reports and in the layout it
+   --  documents, and the auto tier names one of the two fill ciphers.
+   procedure Runtime_Surface;
 
    --  Per-call constellation override via the typed
    --  Set_Inner_Hashes helper: register a bare width-512 profile,

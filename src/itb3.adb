@@ -1,4 +1,4 @@
---  Itb3 root body — byte-buffer helpers shared across the binding.
+--  Byte-buffer helpers shared across the binding.
 
 with Ada.Unchecked_Deallocation;
 

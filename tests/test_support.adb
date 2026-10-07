@@ -1,4 +1,4 @@
---  Test_Support body.
+--  The assertion helpers and the xorshift payload generator.
 
 with Ada.Streams;
 

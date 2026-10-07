@@ -1,4 +1,4 @@
---  itb_tests.gpr — test driver for the Itb binding.
+--  Test driver for the Itb binding.
 --
 --  One driver executable (tests/test_driver.adb) runs every test
 --  procedure from tests/test_cases.adb and exits 0 on full pass /

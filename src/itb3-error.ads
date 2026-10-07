@@ -1,4 +1,4 @@
---  Itb3.Error — the exception raised by every binding subprogram on a
+--  The exception raised by every binding subprogram on a
 --  non-OK libitb3 status, plus accessors over its structured payload.
 --
 --  The Exception_Message attached to every raise carries a
@@ -8,8 +8,8 @@
 --      "25|Triple Pipeline is closed"
 --
 --  decoded by the Status_Code and Message accessors below. The text
---  half combines the status label with the ITB_LastError diagnostic
---  captured immediately after the failing call.
+--  half is the ITB_LastError diagnostic captured immediately after
+--  the failing call.
 
 with Ada.Exceptions;
 

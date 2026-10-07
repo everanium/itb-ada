@@ -1,4 +1,4 @@
---  Common — shared scaffolding for the Ada binding micro-benchmarks.
+--  Shared scaffolding for the Ada binding micro-benchmarks.
 --
 --  Mirrors bindings/c/benches/bench_util.h: each case runs one
 --  untimed warm-up, then iterates until the wall-clock budget

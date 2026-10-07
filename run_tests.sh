@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 #
-# run_tests.sh -- test runner for the Ada binding. Invokes build.sh so
-# the driver under test is always a product of this invocation, then
-# runs it; the driver reports PASS / FAIL per test and exits non-zero on
-# any failure. An optional positional argument filters by exact test
-# name:
+# Test runner for the Ada binding. Invokes build.sh so the driver under
+# test is always a product of this invocation, then runs it; the driver
+# reports PASS / FAIL per test and exits non-zero on any failure. An
+# optional positional argument filters by exact test name:
 #
 #   ./run_tests.sh              # runs every test
 #   ./run_tests.sh smoke        # runs a single test by name

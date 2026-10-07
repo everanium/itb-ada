@@ -1,4 +1,4 @@
---  libitb3.gpr — Ada binding library project for libitb3.
+--  Ada binding library project for libitb3.
 --
 --  Builds the thin-proxy wrapper sources under src/ and exposes the
 --  linker switches needed for any consumer (test driver, bench

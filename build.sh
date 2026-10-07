@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 #
-# build.sh -- one-step build for the Ada binding: libitb3.so + gprbuild
-# on the library, test, bench, and eitb projects. Prerequisites (Go,
-# Alire with a selected gnat_native + gprbuild toolchain) must be
-# installed separately; see README.md "Prerequisites" section.
+# One-step build for the Ada binding: libitb3.so + gprbuild on the
+# library, test, bench, eitb, and loop projects. Prerequisites (Go, Alire
+# with a selected gnat_native + gprbuild toolchain) must be installed
+# separately; see README.md "Prerequisites" section.
 #
 # The build starts by removing every artefact this binding owns, so no
 # output of an earlier build can survive into this one and mask a
 # breakage. ITB_SKIP_CLEAN=1 keeps the tree for fast iteration.
 #
 # Usage:
-#   ./build.sh                      # libitb3.so + all four projects
+#   ./build.sh                      # libitb3.so + all five projects
 #   ./build.sh --noitbasm           # ditto, with ITB asm off
 #   ./build.sh --skip-libitb3        # skip the Go libitb3.so step
 #   ITB_SKIP_CLEAN=1 ./build.sh     # incremental build, no wipe
@@ -42,8 +42,9 @@ done
 # ---------------------------------------------------------------------
 # Artefact wipe.
 #
-# ARTEFACTS names what this binding generates -- the four gprbuild
-# object / exec directories, the eitb binary, and the Alire lock cache.
+# ARTEFACTS names what this binding generates -- the five gprbuild
+# object / exec directories, the eitb and loop binaries, and the Alire
+# lock cache.
 # Inside a git work tree the list is supplemented from `git ls-files
 # --others --ignored`, which enumerates exactly the paths .gitignore
 # covers and by construction can never name a tracked one. Every
@@ -64,6 +65,8 @@ ARTEFACTS=(
     scratch
     eitb/obj
     eitb/eitb
+    loop/obj
+    loop/loop
     '*.ali'
     '*.o'
 )
@@ -139,6 +142,7 @@ gpr libitb3.gpr
 gpr itb_tests.gpr
 gpr itb_bench.gpr
 gpr itb_eitb.gpr
+gpr itb_loop.gpr
 
 # itb_eitb.gpr links eitb/eitb from eitb/eitb.adb. Running `version`
 # proves the binary just produced loads libitb3.so through the rpath

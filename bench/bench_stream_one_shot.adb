@@ -1,4 +1,4 @@
---  bench_stream_one_shot — Encrypt_Stream_One_Shot throughput vs
+--  Encrypt_Stream_One_Shot throughput vs
 --  plaintext size (Streaming Non-AEAD profile by default) at
 --  1 MiB / 16 MiB / 64 MiB. Times the whole-buffer path (a single
 --  FFI round trip through the Pipeline's stream chain).
@@ -18,8 +18,8 @@ procedure Bench_Stream_One_Shot is
    Pipe : Itb3.Pipeline.Pipeline;
 
 begin
-   --  Bench-scale allocation churn leaks Go scratch heap unboundedly
-   --  without a soft memory cap + aggressive GC.
+   --  Bench-scale allocation churn grows the Go scratch heap
+   --  unboundedly without a soft memory cap + aggressive GC.
    Itb3.Runtime.Set_Memory_Limit (4_294_967_296);  --  4 GiB soft cap
    Itb3.Runtime.Set_GC_Percent (100);
 

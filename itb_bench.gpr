@@ -1,4 +1,4 @@
---  itb_bench.gpr — bench executables for the Itb binding.
+--  Bench executables for the Itb binding.
 --
 --  bench/bench_message.adb, bench/bench_stream.adb, and
 --  bench/bench_stream_one_shot.adb are the three main entry points;

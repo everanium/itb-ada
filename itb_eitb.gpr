@@ -1,4 +1,4 @@
---  itb_eitb.gpr — eitb CLI project for the Itb binding.
+--  eitb CLI project for the Itb binding.
 --
 --  Builds the per-binding eitb demonstrator (version / hashes /
 --  encrypt / decrypt subcommands) into eitb/eitb.

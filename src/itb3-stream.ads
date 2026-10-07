@@ -1,4 +1,4 @@
---  Itb3.Stream — incremental stream sessions over an open Pipeline.
+--  Incremental stream sessions over an open Pipeline.
 --
 --  A session is a dumb byte pump: an Encrypt_Stream takes plaintext
 --  in through Write and yields wire through Read; a Decrypt_Stream

@@ -1,4 +1,4 @@
---  Itb3.Opts body — percent-encoding + typed-setter rendering.
+--  Percent-encoding + typed-setter rendering.
 
 with Ada.Strings;
 with Ada.Strings.Fixed;
@@ -193,6 +193,15 @@ package body Itb3.Opts is
    begin
       Set (O, "outerCipher", Name);
    end Set_Outer_Cipher;
+
+   --------------
+   -- Set_DRBG --
+   --------------
+
+   procedure Set_DRBG (O : in out Opts; Name : String) is
+   begin
+      Set (O, "drbg", Name);
+   end Set_DRBG;
 
    --------------------------
    -- Set_Parallax_Palette --

@@ -1,7 +1,7 @@
---  Test_Cases body. Translated from bindings/rust/tests (smoke.rs,
+--  Translated from bindings/rust/tests (smoke.rs,
 --  message.rs, stream_pump.rs, stream_incremental.rs,
---  stream_sticky.rs, stream_cancel.rs, rekey.rs, errors.rs, plus the
---  opts.rs unit tests).
+--  stream_sticky.rs, stream_cancel.rs, rekey.rs, errors.rs,
+--  persist.rs, runtime.rs, plus the opts.rs unit tests).
 
 with Ada.Calendar;
 with Ada.Streams;
@@ -15,6 +15,7 @@ with Itb3;
 with Itb3.Error;
 with Itb3.Opts;
 with Itb3.Pipeline;
+with Itb3.Runtime;
 with Itb3.Status;
 with Itb3.Stream;
 
@@ -694,6 +695,29 @@ package body Test_Cases is
          end;
          Check (Got /= Itb3.Status.OK, "opaque name relay status");
       end;
+
+      --  An unknown drbg name is relayed to Go and rejected there as
+      --  Recipe_Primitive_Unknown, with the token in the diagnostic.
+      declare
+         Bad   : Itb3.Opts.Opts;
+         P     : Itb3.Pipeline.Pipeline;
+         Got   : Integer := -1;
+         Named : Boolean := False;
+      begin
+         Bad.Set_DRBG ("nope");
+         begin
+            P.Init ("singlemsg-triple-mac-v1", Bad);
+            Check (False, "init with unknown drbg name must raise");
+         exception
+            when E : Itb3.Error.Itb_Error =>
+               Got := Itb3.Error.Status_Code (E);
+               Named := Ada.Strings.Fixed.Index
+                          (Itb3.Error.Message (E), "nope") > 0;
+         end;
+         Check (Got = Itb3.Status.Recipe_Primitive_Unknown,
+                "unknown drbg status");
+         Check (Named, "unknown drbg diagnostic must name the token");
+      end;
    end Errors;
 
    -----------------
@@ -718,13 +742,14 @@ package body Test_Cases is
       O.Set_MAC_Name ("hmac-blake3");
       O.Set_Inner_Hash ("areion512");
       O.Set_Outer_Cipher ("chacha20");
+      O.Set_DRBG ("csprng");
       O.Set_Parallax_Palette ("aescmac,chacha20,blake3");
       Check
         (Itb3.Opts.Build (O) =
            "pm=ab01&wm=cdef&withParallax=true&withWrapper=false&"
            & "maxWorkers=4&nonceBits=512&barrierFill=4&chunkSize=4096&"
            & "keyBits=1024&parallaxSegmentSize=65536&macName=hmac-blake3&"
-           & "innerHash=areion512&outerCipher=chacha20&"
+           & "innerHash=areion512&outerCipher=chacha20&drbg=csprng&"
            & "parallaxPalette=aescmac,chacha20,blake3",
          "typed setters render expected keys");
 
@@ -803,6 +828,11 @@ package body Test_Cases is
                (Integer (Ada.Calendar.Seconds (Ada.Calendar.Clock))),
              Ada.Strings.Left)
         & ".blob";
+      type Name_Access is access constant String;
+      Csprng_Name    : aliased constant String := "csprng";
+      Aesitb128_Name : aliased constant String := "aesitb128";
+      Drbg_Names     : constant array (1 .. 2) of Name_Access :=
+        [Csprng_Name'Access, Aesitb128_Name'Access];
    begin
       Sender.Init ("singlemsg-triple-mac-v1", O);
 
@@ -930,6 +960,195 @@ package body Test_Cases is
            (Receiver.Decrypt_Message (Sender.Encrypt_Message (Plain)),
             Plain, "workers round trip");
       end;
+
+      --  The drbg recipe key: an Init under each named fill primitive
+      --  round-trips through a loaded blob and is reported by
+      --  Inspect; an inspected record re-registers under a new name
+      --  and keeps the key. The register payload drops the name and
+      --  the inspection-only nonce_bits / barrier_fill /
+      --  container_mode keys, which sit contiguously between keybits
+      --  and drbg.
+      for Name of Drbg_Names loop
+         declare
+            D_Opts   : Itb3.Opts.Opts;
+            D_Sender : Itb3.Pipeline.Pipeline;
+            D_Recv   : Itb3.Pipeline.Pipeline;
+            Tag      : constant String := Name.all;
+         begin
+            D_Opts.Set_DRBG (Tag);
+            D_Sender.Init ("singlemsg-triple-mac-v1", D_Opts);
+            declare
+               Blob : constant Itb3.Byte_Array := D_Sender.Save;
+               Want : constant String := """drbg"":""" & Tag & """";
+            begin
+               D_Recv.Load (Blob);
+               Check_Eq
+                 (D_Recv.Decrypt_Message (D_Sender.Encrypt_Message (Plain)),
+                  Plain, "drbg round trip");
+               Check_Eq
+                 (D_Sender.Decrypt_Message (D_Recv.Encrypt_Message (Plain)),
+                  Plain, "drbg reverse round trip");
+               declare
+                  Inspected : constant String :=
+                    Itb3.Pipeline.Inspect (Blob);
+                  P_Mode    : constant Natural :=
+                    Ada.Strings.Fixed.Index (Inspected, """mode""");
+                  P_Cut     : constant Natural :=
+                    Ada.Strings.Fixed.Index (Inspected, """nonce_bits""");
+                  P_Drbg    : constant Natural :=
+                    Ada.Strings.Fixed.Index (Inspected, """drbg""");
+               begin
+                  Check (Ada.Strings.Fixed.Index (Inspected, Want) > 0,
+                         "inspect must carry the drbg key");
+                  if Tag = "csprng" then
+                     Check (P_Mode > 0 and then P_Cut > P_Mode
+                              and then P_Drbg > P_Cut,
+                            "inspect key order for the register payload");
+                     Itb3.Pipeline.Register
+                       ("ada-binding-test-drbg-copy",
+                        "{" & Inspected (P_Mode .. P_Cut - 1)
+                        & Inspected (P_Drbg .. Inspected'Last));
+                     Check (Ada.Strings.Fixed.Index
+                              (Itb3.Pipeline.Lookup
+                                 ("ada-binding-test-drbg-copy"),
+                               Want) > 0,
+                            "lookup must keep the drbg key");
+                  end if;
+               end;
+            end;
+         end;
+      end loop;
+
+      --  Default: no drbg key in Inspect, nor in a shipped Lookup.
+      declare
+         Plain_Opts : Itb3.Opts.Opts;
+         D_Sender   : Itb3.Pipeline.Pipeline;
+      begin
+         D_Sender.Init ("singlemsg-triple-mac-v1", Plain_Opts);
+         Check (Ada.Strings.Fixed.Index
+                  (Itb3.Pipeline.Inspect (D_Sender.Save), """drbg""") = 0,
+                "default inspect must omit drbg");
+         Check (Ada.Strings.Fixed.Index
+                  (Itb3.Pipeline.Lookup ("singlemsg-triple-mac-v1"),
+                   """drbg""") = 0,
+                "shipped lookup must omit drbg");
+      end;
    end Persist;
+
+   ---------------------
+   -- Runtime_Surface --
+   ---------------------
+
+   procedure Runtime_Surface is
+      use type Interfaces.Integer_64;
+
+      use type Ada.Streams.Stream_IO.Count;
+
+      Previous : Integer;
+      Slots    : Natural;
+      Written  : Natural;
+      Tiers    : Natural;
+      Path     : constant String := "itb_ada_heap.prof";
+   begin
+      --  GOMAXPROCS: the query form reads back what the setter
+      --  installed, and the setter reports nothing of its own.
+      Previous := Itb3.Runtime.GOMAXPROCS;
+      Check (Previous > 0, "gomaxprocs query is positive");
+      Itb3.Runtime.Set_GOMAXPROCS (2);
+      Check (Itb3.Runtime.GOMAXPROCS = 2, "gomaxprocs reads back 2");
+      Itb3.Runtime.Set_GOMAXPROCS (Previous);
+      Check (Itb3.Runtime.GOMAXPROCS = Previous, "gomaxprocs restored");
+
+      Check (Itb3.Runtime.Memory_Limit /= 0, "memory limit query non-zero");
+
+      --  Pool counters: the length query sizes the destination, the
+      --  first slot carries the tier count, and the whole vector is
+      --  1 + 5*T + 8 slots long.
+      Slots := Itb3.Runtime.Pool_Stats_Len;
+      Check (Slots > 0, "pool stats length positive");
+      declare
+         Snapshot : Itb3.Runtime.Pool_Counters (1 .. Slots);
+         Later    : Itb3.Runtime.Pool_Counters (1 .. Slots);
+      begin
+         Itb3.Runtime.Pool_Stats (Snapshot, Written);
+         Check (Written = Slots, "pool stats fills every slot");
+         Check (Snapshot (1) > 0, "slot 1 carries a tier count");
+         Tiers := Natural (Snapshot (1));
+         Check (1 + 5 * Tiers + 8 = Slots, "length is 1 + 5*T + 8");
+
+         --  A destination shorter than the reported length is refused
+         --  with Buffer_Too_Small.
+         declare
+            Narrow : Itb3.Runtime.Pool_Counters (1 .. 1);
+            Got    : Integer := -1;
+         begin
+            begin
+               Itb3.Runtime.Pool_Stats (Narrow, Written);
+               Check (False, "a short pool buffer must raise");
+            exception
+               when E : Itb3.Error.Itb_Error =>
+                  Got := Itb3.Error.Status_Code (E);
+            end;
+            Check (Got = Itb3.Status.Buffer_Too_Small,
+                   "short pool buffer status");
+            Check (Written = Slots, "short pool buffer reports the need");
+         end;
+
+         --  The counters are monotonic totals since library load, so
+         --  a second snapshot after a round trip never goes
+         --  backwards.
+         declare
+            Options : Itb3.Opts.Opts;
+            Pipe    : Itb3.Pipeline.Pipeline;
+            Plain   : constant Itb3.Byte_Array :=
+              Test_Support.Payload (4096, 24);
+         begin
+            Pipe.Init ("singlemsg-triple-nomac-v1", Options);
+            Check_Eq (Pipe.Decrypt_Message (Pipe.Encrypt_Message (Plain)),
+                      Plain, "pool traffic round trip");
+         end;
+         Itb3.Runtime.Pool_Stats (Later, Written);
+         for I in 1 .. Slots loop
+            Check (Later (I) >= Snapshot (I), "pool counters never decrease");
+         end loop;
+         Check (Later (3) > Snapshot (3), "tier 0 checkouts advanced");
+      end;
+
+      --  Heap profile: the file lands on disk and carries bytes.
+      Itb3.Runtime.Write_Heap_Profile (Path);
+      declare
+         F : Ada.Streams.Stream_IO.File_Type;
+      begin
+         Ada.Streams.Stream_IO.Open
+           (F, Ada.Streams.Stream_IO.In_File, Path);
+         Check (Ada.Streams.Stream_IO.Size (F) > 0,
+                "heap profile is non-empty");
+         Ada.Streams.Stream_IO.Delete (F);
+      end;
+
+      --  The hash registry is the authority the "innerHash" opts key
+      --  is validated against.
+      declare
+         JSON : constant String := Itb3.Pipeline.Hash_Names;
+      begin
+         Check (JSON'Length > 2, "hash registry is non-empty");
+         Check (JSON (JSON'First) = '[', "hash registry is a JSON array");
+         Check (Ada.Strings.Fixed.Index (JSON, """areion512""") > 0,
+                "registry lists areion512");
+         Check (Ada.Strings.Fixed.Index (JSON, """aesitb128""") > 0,
+                "registry lists aesitb128");
+         Check (Ada.Strings.Fixed.Index (JSON, """nope""") = 0,
+                "registry omits a made-up name");
+      end;
+
+      --  Auto DRBG tier: one of the two fill ciphers, resolved per
+      --  host.
+      declare
+         Tier : constant String := Itb3.Runtime.DRBG_Auto_Tier;
+      begin
+         Check (Tier = "aes-256-ctr" or else Tier = "chacha20",
+                "drbg auto tier: " & Tier);
+      end;
+   end Runtime_Surface;
 
 end Test_Cases;

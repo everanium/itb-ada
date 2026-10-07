@@ -1,4 +1,4 @@
---  Itb3.Opts — URL-query builder for the opts pass-through string.
+--  URL-query builder for the opts pass-through string.
 --
 --  The builder performs no validation: every key and value is
 --  rendered into a percent-encoded query string and passed through
@@ -46,6 +46,11 @@ package Itb3.Opts is
    procedure Set_Inner_Hashes (O : in out Opts; Names : String);
 
    procedure Set_Outer_Cipher (O : in out Opts; Name : String);
+
+   --  Fill primitive for container noise and lane residue on
+   --  encrypt, passed through opaquely ("drbg"); an unknown name is
+   --  rejected by libitb3 as Recipe_Primitive_Unknown at Init.
+   procedure Set_DRBG (O : in out Opts; Name : String);
 
    --  Comma-separated palette names, passed through opaquely
    --  ("parallaxPalette").

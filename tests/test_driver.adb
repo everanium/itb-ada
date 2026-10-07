@@ -1,4 +1,4 @@
---  test_driver — runs the binding test roster and reports PASS /
+--  Runs the binding test roster and reports PASS /
 --  FAIL per test in Go-test style. Optional positional argument
 --  filters by exact test name (e.g. `test_driver smoke`).
 --  Exits 0 when every executed test passed, 1 otherwise.
@@ -55,6 +55,7 @@ begin
    Run ("opts", Test_Cases.Opts_Render'Access);
    Run ("opts_inner_hashes",
         Test_Cases.Opts_Inner_Hashes_Round_Trip'Access);
+   Run ("runtime", Test_Cases.Runtime_Surface'Access);
 
    Ada.Text_IO.Put_Line
      ("ran" & Ran'Image & " tests --"

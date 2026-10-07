@@ -1,8 +1,8 @@
---  Itb3.Status — numeric status codes mirrored from the libitb3 C ABI
+--  Numeric status codes mirrored from the libitb3 C ABI
 --  (cmd/cshared/internal/capi/errors.go). Numeric values are stable
 --  across releases. Codes 11..13 are the Triple blob-record /
 --  registry sentinels; the reserved block 14..17 is intentionally
---  unnamed here — Label reports it generically.
+--  unnamed here.
 
 package Itb3.Status is
 
@@ -31,8 +31,5 @@ package Itb3.Status is
    Triple_Closed        : constant Code := 25;
    Profile_Exists       : constant Code := 26;
    Internal_Error       : constant Code := 99;
-
-   --  Short human-readable label for a status code.
-   function Label (S : Code) return String;
 
 end Itb3.Status;

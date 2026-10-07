@@ -1,4 +1,4 @@
---  Common body — env readers, getrandom(2) fill, timing runner.
+--  Env readers, getrandom(2) fill, timing runner.
 
 with Ada.Environment_Variables;
 with Ada.Real_Time;
