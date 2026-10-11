@@ -68,6 +68,15 @@ package body Itb3.Opts is
       Append (O.Query, Enc (Key) & "=" & Enc (Value));
    end Set;
 
+   --------------
+   -- Set_Mode --
+   --------------
+
+   procedure Set_Mode (O : in out Opts; N : Integer) is
+   begin
+      Set (O, "mode", Int_Image (N));
+   end Set_Mode;
+
    ---------------------
    -- Set_Perm_Master --
    ---------------------

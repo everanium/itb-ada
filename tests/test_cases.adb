@@ -729,6 +729,7 @@ package body Test_Cases is
       PM : constant Itb3.Byte_Array (1 .. 2) := [16#AB#, 16#01#];
       WM : constant Itb3.Byte_Array (1 .. 2) := [16#CD#, 16#EF#];
    begin
+      O.Set_Mode (2);
       O.Set_Perm_Master (PM);
       O.Set_Wrap_Master (WM);
       O.Set_With_Parallax (True);
@@ -746,7 +747,7 @@ package body Test_Cases is
       O.Set_Parallax_Palette ("aescmac,chacha20,blake3");
       Check
         (Itb3.Opts.Build (O) =
-           "pm=ab01&wm=cdef&withParallax=true&withWrapper=false&"
+           "mode=2&pm=ab01&wm=cdef&withParallax=true&withWrapper=false&"
            & "maxWorkers=4&nonceBits=512&barrierFill=4&chunkSize=4096&"
            & "keyBits=1024&parallaxSegmentSize=65536&macName=hmac-blake3&"
            & "innerHash=areion512&outerCipher=chacha20&drbg=csprng&"
@@ -756,8 +757,8 @@ package body Test_Cases is
       declare
          R : Itb3.Opts.Opts;
       begin
-         R.Set ("mode", "a b&c=d%");
-         Check (Itb3.Opts.Build (R) = "mode=a%20b%26c%3Dd%25",
+         R.Set ("arbitrary", "a b&c=d%");
+         Check (Itb3.Opts.Build (R) = "arbitrary=a%20b%26c%3Dd%25",
                 "raw escape hatch encoding");
       end;
 
@@ -879,6 +880,8 @@ package body Test_Cases is
                    "inspect must carry the inspection-only nonce_bits");
             Check (Ada.Strings.Fixed.Index (Inspected, """barrier_fill"":") > 0,
                    "inspect must carry the inspection-only barrier_fill");
+            Check (Ada.Strings.Fixed.Index (Inspected, """container_mode"":1") > 0,
+                   "inspect must carry container_mode=1 by default");
             Check (Ada.Strings.Fixed.Index
                      (Looked, """name"":""singlemsg-triple-mac-v1""") > 0,
                    "lookup must carry the name");
@@ -886,6 +889,23 @@ package body Test_Cases is
                    "lookup must omit the inspection-only nonce_bits");
             Check (Ada.Strings.Fixed.Index (Looked, """barrier_fill"":") = 0,
                    "lookup must omit the inspection-only barrier_fill");
+            Check (Ada.Strings.Fixed.Index (Looked, """container_mode"":") = 0,
+                   "lookup must omit the inspection-only container_mode");
+         end;
+
+         declare
+            M2_Opts : Itb3.Opts.Opts;
+            M2_Pipe : Itb3.Pipeline.Pipeline;
+         begin
+            M2_Opts.Set_Mode (2);
+            M2_Pipe.Init ("singlemsg-triple-mac-v1", M2_Opts);
+            declare
+               M2_Blob : constant Itb3.Byte_Array := M2_Pipe.Save;
+               M2_Insp : constant String := Itb3.Pipeline.Inspect (M2_Blob);
+            begin
+               Check (Ada.Strings.Fixed.Index (M2_Insp, """container_mode"":2") > 0,
+                      "inspect must carry container_mode=2 under mode 2");
+            end;
          end;
       end;
 

@@ -98,6 +98,7 @@ shape travels inside the blob, so the receiver needs no options of
 its own:
 
 ```ada
+Itb.Opts.Set_Mode (Options, 2);
 Itb.Opts.Set_Chunk_Size (Options, 65536);
 Itb.Opts.Set_With_Wrapper (Options, False);
 Itb.Opts.Set_Max_Workers (Options, 4);

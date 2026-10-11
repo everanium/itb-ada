@@ -777,72 +777,6 @@ procedure Loop_Main is
          Log_Line (Head & " (inspect: " & Detail (E) & ")");
    end Log_Pipeline_Initialised;
 
-   --  Sets the inner blob's "mode" field of a wrap-layer session blob
-   --  to Target (1 = per-region, 2 = per-container) in place. The wrap
-   --  layer's profile record carries its own "mode" (a string), so the
-   --  search starts at the inner blob ("ib"); both shipped modes are
-   --  one digit wide, so the blob length does not change and the key
-   --  material in Blob is never copied. Returns False when the inner
-   --  blob or its mode field is not found.
-   function Edit_Inner_Blob_Mode
-     (Blob : in out Byte_Array; Target : Integer) return Boolean
-   is
-      use type Ada.Streams.Stream_Element;
-      use type Ada.Streams.Stream_Element_Offset;
-
-      --  Offset of the first occurrence of Needle in Blob at or after
-      --  From, or Blob'Last + 1 when absent.
-      function Find_Bytes
-        (From : Element_Offset; Needle : String) return Element_Offset is
-      begin
-         for I in From .. Blob'Last - Element_Offset (Needle'Length) + 1 loop
-            declare
-               Hit : Boolean := True;
-            begin
-               for J in Needle'Range loop
-                  if Blob (I + Element_Offset (J - Needle'First))
-                    /= Character'Pos (Needle (J))
-                  then
-                     Hit := False;
-                     exit;
-                  end if;
-               end loop;
-               if Hit then
-                  return I;
-               end if;
-            end;
-         end loop;
-         return Blob'Last + 1;
-      end Find_Bytes;
-
-      IB_Key   : constant String := """ib"":{";
-      Mode_Key : constant String := """mode"":";
-      IB       : Element_Offset;
-      Mode     : Element_Offset;
-      At_Pos   : Element_Offset;
-   begin
-      IB := Find_Bytes (Blob'First, IB_Key);
-      if IB > Blob'Last then
-         return False;
-      end if;
-      Mode := Find_Bytes (IB + IB_Key'Length, Mode_Key);
-      if Mode > Blob'Last then
-         return False;
-      end if;
-      At_Pos := Mode + Mode_Key'Length;
-      if At_Pos + 1 > Blob'Last
-        or else Blob (At_Pos) < Character'Pos ('1')
-        or else Blob (At_Pos) > Character'Pos ('2')
-        or else (Blob (At_Pos + 1) >= Character'Pos ('0')
-                 and then Blob (At_Pos + 1) <= Character'Pos ('9'))
-      then
-         return False;
-      end if;
-      Blob (At_Pos) :=
-        Ada.Streams.Stream_Element (Character'Pos ('0') + Target);
-      return True;
-   end Edit_Inner_Blob_Mode;
-
    --  Folds a keystream primitive into opts for any layer the named
    --  profile leaves unfilled but the operator asked for.
    --
@@ -914,6 +848,9 @@ procedure Loop_Main is
    begin
       Pipe := null;
       Blob := null;
+      if Cfg.Blob_Mode /= 1 then
+         Itb3.Opts.Set_Mode (Options, Cfg.Blob_Mode);
+      end if;
       Itb3.Opts.Set (Options, "innerHash", SU.To_String (Cfg.Hash));
       Itb3.Opts.Set (Options, "macName", SU.To_String (Cfg.MAC));
       Itb3.Opts.Set (Options, "withParallax", Truth (Cfg.Parallax));
@@ -951,23 +888,6 @@ procedure Loop_Main is
             Err_Line ("Save(" & Profile & "): " & Detail (E));
             return False;
       end;
-      if Cfg.Blob_Mode = 2 then
-         --  The sizing mode is not an Opts knob: the Init blob is
-         --  edited and the Pipeline reopened from it (Load releases
-         --  the Init handle first), so the retained blob (the one
-         --  blob-cycle reopens from) carries the edited mode.
-         if not Edit_Inner_Blob_Mode (Blob.all, 2) then
-            Err_Line ("rewrite blob mode: inner blob mode field not found");
-            return False;
-         end if;
-         begin
-            Itb3.Pipeline.Load (Pipe.all, Blob.all);
-         exception
-            when E : Itb3.Error.Itb_Error =>
-               Err_Line ("reload Mode 2 blob: " & Detail (E));
-               return False;
-         end;
-      end if;
       Log_Pipeline_Initialised (Profile, Blob.all);
       return True;
    end Build_Pipeline;
