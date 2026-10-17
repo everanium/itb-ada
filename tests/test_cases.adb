@@ -184,6 +184,66 @@ package body Test_Cases is
          Check_Eq (Receiver.Decrypt_Message (Wire), Plain,
                    "smoke round trip");
       end;
+
+      declare
+         Flat       : Itb3.Byte_Array (1 .. 8 * 32);
+         Lens       : constant Itb3.Size_Array (1 .. 8) := [others => 32];
+         K1, K2, Bad : Itb3.Pipeline.Pipeline;
+         Caught     : Boolean;
+      begin
+         for I in 0 .. 7 loop
+            for J in 1 .. 32 loop
+               Flat (Offset (I * 32 + J)) := Element (16#11# * (I + 1));
+            end loop;
+         end loop;
+
+         K1.Init_Keys ("singlemsg-triple-mac-v1", Flat, Lens);
+         K2.Init_Keys ("singlemsg-triple-mac-v1", Flat, Lens, O);
+         Check_Eq (K1.Save, K2.Save, "Init_Keys deterministic blob");
+
+         declare
+            K_Wire : constant Itb3.Byte_Array := K1.Encrypt_Message (Plain);
+         begin
+            Check_Eq (K2.Decrypt_Message (K_Wire), Plain,
+                      "Init_Keys round trip");
+         end;
+
+         --  Duplicate key must fail with Bad_Input.
+         declare
+            Dup_Flat : Itb3.Byte_Array := Flat;
+         begin
+            Dup_Flat (33 .. 64) := Dup_Flat (1 .. 32);
+            Caught := False;
+            begin
+               Bad.Init_Keys ("singlemsg-triple-mac-v1", Dup_Flat, Lens);
+            exception
+               when E : Itb3.Error.Itb_Error =>
+                  Check (Itb3.Error.Status_Code (E) = Itb3.Status.Bad_Input,
+                         "duplicate key must raise Bad_Input");
+                  Caught := True;
+            end;
+            Check (Caught, "duplicate key must raise Itb_Error");
+         end;
+
+         --  Short (< 16 bytes) key must fail with Bad_Input.
+         declare
+            Short_Flat : constant Itb3.Byte_Array (1 .. 8 + 7 * 32) :=
+              Flat (1 .. 8 + 7 * 32);
+            Short_Lens : constant Itb3.Size_Array (1 .. 8) :=
+              [8, 32, 32, 32, 32, 32, 32, 32];
+         begin
+            Caught := False;
+            begin
+               Bad.Init_Keys ("singlemsg-triple-mac-v1", Short_Flat, Short_Lens);
+            exception
+               when E : Itb3.Error.Itb_Error =>
+                  Check (Itb3.Error.Status_Code (E) = Itb3.Status.Bad_Input,
+                         "short key must raise Bad_Input");
+                  Caught := True;
+            end;
+            Check (Caught, "short key must raise Itb_Error");
+         end;
+      end;
    end Smoke;
 
    -------------

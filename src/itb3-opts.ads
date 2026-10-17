@@ -14,6 +14,8 @@ package Itb3.Opts is
    --  renders as the empty query (profile defaults apply).
    type Opts is tagged private;
 
+   Empty : constant Opts;
+
    --  Escape hatch appending a raw key=value pair. Covers every key
    --  the Go side accepts for Init overrides. Profile registration
    --  takes a profile JSON record instead (see Itb3.Pipeline.Register).
@@ -66,5 +68,8 @@ private
    type Opts is tagged record
       Query : Ada.Strings.Unbounded.Unbounded_String;
    end record;
+
+   Empty : constant Opts :=
+     (Query => Ada.Strings.Unbounded.Null_Unbounded_String);
 
 end Itb3.Opts;

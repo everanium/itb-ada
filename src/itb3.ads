@@ -34,6 +34,9 @@ package Itb3 is
    --  arbitrary plaintext / wire / session-blob bytes.
    subtype Byte_Array is Ada.Streams.Stream_Element_Array;
 
+   --  Per-key byte-length array consumed by Init_Keys.
+   type Size_Array is array (Positive range <>) of Natural;
+
    type Byte_Array_Access is access Byte_Array;
 
    --  Releases a heap-allocated byte buffer. Null-safe.
@@ -104,6 +107,20 @@ private
       Out_Handle : access Handle) return C_Int
    with Import => True, Convention => C,
         External_Name => "ITB_Triple_Init";
+
+   function ITB_Triple_InitKeys
+     (Profile          : System.Address;
+      Opts             : System.Address;
+      Masters_Flat     : System.Address;
+      Masters_Flat_Len : Size_T;
+      Master_Lens      : System.Address;
+      Masters_Count    : Size_T;
+      Blob_Out         : System.Address;
+      Blob_Cap         : Size_T;
+      Blob_Len         : access Size_T;
+      Out_Handle       : access Handle) return C_Int
+   with Import => True, Convention => C,
+        External_Name => "ITB_Triple_InitKeys";
 
    function ITB_Triple_Load
      (Blob            : System.Address;

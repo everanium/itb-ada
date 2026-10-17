@@ -18,12 +18,33 @@ package Itb3.Pipeline is
 
    type Pipeline is tagged limited private;
 
+   subtype Size_Array is Itb3.Size_Array;
+
    --  Constructs a fresh Pipeline against the named profile. The
    --  session-bundle blob for the receiver is available through Save.
    procedure Init
      (P       : in out Pipeline;
       Profile : String;
       Options : Itb3.Opts.Opts);
+
+   --  Constructs a Pipeline from caller-supplied master keys (8 for
+   --  MAC profiles, 7 for No-MAC profiles, plus optional Parallax and
+   --  Wrapper masters), packed contiguously in Masters_Flat with
+   --  per-key byte lengths in Master_Lens. Key counts, lengths, and
+   --  pairwise distinctness are validated by libitb3.
+   procedure Init_Keys
+     (P            : in out Pipeline;
+      Profile      : String;
+      Masters_Flat : Byte_Array;
+      Master_Lens  : Size_Array;
+      Options      : Itb3.Opts.Opts := Itb3.Opts.Empty);
+
+   procedure Init_Keys
+     (P            : in out Pipeline;
+      Profile      : String;
+      Options      : Itb3.Opts.Opts;
+      Masters_Flat : Byte_Array;
+      Master_Lens  : Size_Array);
 
    --  Reconstructs a Pipeline from a blob produced by Save or Rekey,
    --  using the blob-embedded masters. The profile shape travels

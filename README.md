@@ -12,7 +12,7 @@ into the repository's `dist/` tree — no loader-path setup for the
 in-repo layout. Every hash-name / MAC-name / cipher-name /
 profile-name is an opaque `String` passed through to Go for
 validation; the binding carries no ITB construction logic. The public
-surface is the `Itb.Pipeline.Pipeline` controlled type (Init / Load /
+surface is the `Itb.Pipeline.Pipeline` controlled type (Init / Init_Keys / Load /
 Save / Rekey / Close, Single Message encrypt / decrypt, one-shot
 stream ciphers, the profile-record entries Inspect / Register /
 Lookup / Profiles), incremental sessions in `Itb.Stream`, the
@@ -105,6 +105,8 @@ Itb.Opts.Set_Max_Workers (Options, 4);
 Sender.Init ("singlemsg-triple-mac-v1", Options);
 Receiver.Load (Sender.Save);
 ```
+
+`Itb.Pipeline.Init_Keys` constructs a Pipeline from caller-supplied master keys (8 for MAC profiles, 7 for No-MAC profiles, plus optional Parallax and Wrapper masters; each >= 16 bytes and pairwise distinct) instead of sampling fresh entropy via `Init`.
 
 `Itb.Pipeline.Rekey` rotates the parallax + wrapper masters
 mid-session (the eight ITB seeds and MAC key are fixed for the

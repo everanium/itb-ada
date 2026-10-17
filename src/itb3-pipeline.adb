@@ -118,6 +118,68 @@ package body Itb3.Pipeline is
       end;
    end Init;
 
+   ---------------
+   -- Init_Keys --
+   ---------------
+
+   procedure Init_Keys
+     (P            : in out Pipeline;
+      Profile      : String;
+      Masters_Flat : Byte_Array;
+      Master_Lens  : Size_Array;
+      Options      : Itb3.Opts.Opts := Itb3.Opts.Empty)
+   is
+      Profile_C : aliased constant char_array := To_C (Profile);
+      Opts_C    : aliased constant char_array :=
+        To_C (Itb3.Opts.Build (Options));
+      Lens_C    : array (1 .. Master_Lens'Length) of aliased Size_T
+        with Convention => C;
+      Flat_Addr : constant System.Address :=
+        (if Masters_Flat'Length = 0 then System.Null_Address
+         else Masters_Flat (Masters_Flat'First)'Address);
+      Lens_Addr : System.Address;
+      H         : aliased Handle := Null_Handle;
+
+      function Call
+        (Out_Buf : System.Address;
+         Out_Cap : Size_T;
+         Out_Len : access Size_T) return C_Int is
+      begin
+         H := Null_Handle;
+         return ITB_Triple_InitKeys
+           (Profile_C'Address, Opts_C'Address,
+            Flat_Addr, Size_T (Masters_Flat'Length),
+            Lens_Addr, Size_T (Lens_C'Length),
+            Out_Buf, Out_Cap, Out_Len, H'Access);
+      end Call;
+
+      function Run is new Buffer_Call (Call);
+   begin
+      for I in Master_Lens'Range loop
+         Lens_C (I - Master_Lens'First + 1) := Size_T (Master_Lens (I));
+      end loop;
+      Lens_Addr :=
+        (if Lens_C'Length = 0 then System.Null_Address
+         else Lens_C (1)'Address);
+      Release (P);
+      declare
+         Blob : constant Byte_Array := Run;
+         pragma Unreferenced (Blob);
+      begin
+         P.H := H;
+      end;
+   end Init_Keys;
+
+   procedure Init_Keys
+     (P            : in out Pipeline;
+      Profile      : String;
+      Options      : Itb3.Opts.Opts;
+      Masters_Flat : Byte_Array;
+      Master_Lens  : Size_Array) is
+   begin
+      Init_Keys (P, Profile, Masters_Flat, Master_Lens, Options);
+   end Init_Keys;
+
    ----------
    -- Load --
    ----------
