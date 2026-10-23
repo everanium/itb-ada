@@ -30,7 +30,7 @@ procedure Eitb is
 
    use type Ada.Streams.Stream_Element_Offset;
 
-   Binding_Version : constant String := "0.7.3";
+   Binding_Version : constant String := "0.7.4";
 
    Hex_Digits : constant String := "0123456789abcdef";
 
