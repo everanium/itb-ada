@@ -1,6 +1,6 @@
 name = "libitb3"
 description = "ITB Symmetric Cipher Construction with Ambiguity-Based Security - Ada"
-version = "0.7.4"
+version = "0.7.5"
 authors = ["Andrey Kuvshinov"]
 maintainers = ["Andrey Kuvshinov <andrew@encloud.blue>"]
 maintainers-logins = ["everanium"]

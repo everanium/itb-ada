@@ -62,17 +62,25 @@ package body Itb3.Pipeline is
       if Integer (St) = Itb3.Status.Buffer_Too_Small
          and then Len > Size_T (Buf.all'Length)
       then
+         Buf.all := [others => 0];
+         pragma Inspection_Point (Buf);
          Free (Buf);
          Buf := new Byte_Array (1 .. Offset (Len));
          St := Call (Buf.all'Address, Len, Len'Access);
       end if;
       if Integer (St) /= Itb3.Status.OK then
+         Buf.all := [others => 0];
+         pragma Inspection_Point (Buf);
          Free (Buf);
          Itb3.Error.Raise_For (Integer (St));
       end if;
       declare
          Result : constant Byte_Array := Buf.all (1 .. Offset (Len));
       begin
+         if Len > 0 then
+            Buf.all (1 .. Offset (Len)) := [others => 0];
+            pragma Inspection_Point (Buf);
+         end if;
          Free (Buf);
          return Result;
       end;
@@ -88,7 +96,7 @@ package body Itb3.Pipeline is
       Options : Itb3.Opts.Opts)
    is
       Profile_C : aliased constant char_array := To_C (Profile);
-      Opts_C    : aliased constant char_array :=
+      Opts_C    : aliased char_array :=
         To_C (Itb3.Opts.Build (Options));
       H         : aliased Handle := Null_Handle;
 
@@ -111,10 +119,18 @@ package body Itb3.Pipeline is
    begin
       Release (P);
       declare
-         Blob : constant Byte_Array := Run;
-         pragma Unreferenced (Blob);
+         Blob : Byte_Array := Run;
       begin
+         Opts_C := [others => nul];
+         pragma Inspection_Point (Opts_C);
+         Blob := [others => 0];
+         pragma Inspection_Point (Blob);
          P.H := H;
+      exception
+         when others =>
+            Opts_C := [others => nul];
+            pragma Inspection_Point (Opts_C);
+            raise;
       end;
    end Init;
 
@@ -130,7 +146,7 @@ package body Itb3.Pipeline is
       Options      : Itb3.Opts.Opts := Itb3.Opts.Empty)
    is
       Profile_C : aliased constant char_array := To_C (Profile);
-      Opts_C    : aliased constant char_array :=
+      Opts_C    : aliased char_array :=
         To_C (Itb3.Opts.Build (Options));
       Lens_C    : array (1 .. Master_Lens'Length) of aliased Size_T
         with Convention => C;
@@ -163,10 +179,18 @@ package body Itb3.Pipeline is
          else Lens_C (1)'Address);
       Release (P);
       declare
-         Blob : constant Byte_Array := Run;
-         pragma Unreferenced (Blob);
+         Blob : Byte_Array := Run;
       begin
+         Opts_C := [others => nul];
+         pragma Inspection_Point (Opts_C);
+         Blob := [others => 0];
+         pragma Inspection_Point (Blob);
          P.H := H;
+      exception
+         when others =>
+            Opts_C := [others => nul];
+            pragma Inspection_Point (Opts_C);
+            raise;
       end;
    end Init_Keys;
 
@@ -341,10 +365,10 @@ package body Itb3.Pipeline is
       Perm_Master : Byte_Array;
       Wrap_Master : Byte_Array)
    is
-      Blob : constant Byte_Array := Rekey (P, Perm_Master, Wrap_Master);
-      pragma Unreferenced (Blob);
+      Blob : Byte_Array := Rekey (P, Perm_Master, Wrap_Master);
    begin
-      null;
+      Blob := [others => 0];
+      pragma Inspection_Point (Blob);
    end Rekey;
 
    -----------
