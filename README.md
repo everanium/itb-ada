@@ -99,6 +99,7 @@ its own:
 
 ```ada
 Itb.Opts.Set_Mode (Options, 2);
+Itb.Opts.Set_Interlock (Options, "168");  --  "48" | "168" ("" = default 48-bit; "168" requires a 512-bit hash)
 Itb.Opts.Set_Chunk_Size (Options, 65536);
 Itb.Opts.Set_With_Wrapper (Options, False);
 Itb.Opts.Set_Max_Workers (Options, 4);

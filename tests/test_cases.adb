@@ -790,6 +790,7 @@ package body Test_Cases is
       WM : constant Itb3.Byte_Array (1 .. 2) := [16#CD#, 16#EF#];
    begin
       O.Set_Mode (2);
+      O.Set_Interlock ("168");
       O.Set_Perm_Master (PM);
       O.Set_Wrap_Master (WM);
       O.Set_With_Parallax (True);
@@ -807,7 +808,7 @@ package body Test_Cases is
       O.Set_Parallax_Palette ("aescmac,chacha20,blake3");
       Check
         (Itb3.Opts.Build (O) =
-           "mode=2&pm=ab01&wm=cdef&withParallax=true&withWrapper=false&"
+           "mode=2&interlock=168&pm=ab01&wm=cdef&withParallax=true&withWrapper=false&"
            & "maxWorkers=4&nonceBits=512&barrierFill=4&chunkSize=4096&"
            & "keyBits=1024&parallaxSegmentSize=65536&macName=hmac-blake3&"
            & "innerHash=areion512&outerCipher=chacha20&drbg=csprng&"
@@ -1112,6 +1113,67 @@ package body Test_Cases is
                   (Itb3.Pipeline.Lookup ("singlemsg-triple-mac-v1"),
                    """drbg""") = 0,
                 "shipped lookup must omit drbg");
+      end;
+
+      --  Interlock 168-bit on a 512-bit profile round-trips and
+      --  travels in the blob; 256-bit hash and unknown width are
+      --  refused with Bad_Input.
+      declare
+         IL_Opts   : Itb3.Opts.Opts;
+         IL_Sender : Itb3.Pipeline.Pipeline;
+         IL_Recv   : Itb3.Pipeline.Pipeline;
+      begin
+         IL_Opts.Set_Interlock ("168");
+         IL_Sender.Init ("singlemsg-triple-mac-v1", IL_Opts);
+         Check_Eq
+           (IL_Sender.Decrypt_Message (IL_Sender.Encrypt_Message (Plain)),
+            Plain, "interlock 168 self round trip");
+         declare
+            IL_Blob : constant Itb3.Byte_Array := IL_Sender.Save;
+            IL_Insp : constant String := Itb3.Pipeline.Inspect (IL_Blob);
+         begin
+            Check (Ada.Strings.Fixed.Index
+                     (IL_Insp, """interlock"":""168""") > 0,
+                   "inspect must carry interlock=168");
+            IL_Recv.Load (IL_Blob);
+            Check_Eq
+              (IL_Recv.Decrypt_Message (IL_Sender.Encrypt_Message (Plain)),
+               Plain, "interlock 168 loaded round trip");
+         end;
+      end;
+
+      declare
+         Bad_Opts : Itb3.Opts.Opts;
+         Bad_Pipe : Itb3.Pipeline.Pipeline;
+         Got      : Integer := -1;
+      begin
+         Bad_Opts.Set_Inner_Hash ("blake3");
+         Bad_Opts.Set_Interlock ("168");
+         begin
+            Bad_Pipe.Init ("singlemsg-triple-mac-v1", Bad_Opts);
+            Check (False, "interlock 168 on 256-bit hash must raise");
+         exception
+            when E : Itb3.Error.Itb_Error =>
+               Got := Itb3.Error.Status_Code (E);
+         end;
+         Check (Got = Itb3.Status.Bad_Input,
+                "interlock 168 on 256-bit hash status");
+      end;
+
+      declare
+         Bad_Opts : Itb3.Opts.Opts;
+         Bad_Pipe : Itb3.Pipeline.Pipeline;
+         Got      : Integer := -1;
+      begin
+         Bad_Opts.Set_Interlock ("96");
+         begin
+            Bad_Pipe.Init ("singlemsg-triple-mac-v1", Bad_Opts);
+            Check (False, "interlock 96 must raise");
+         exception
+            when E : Itb3.Error.Itb_Error =>
+               Got := Itb3.Error.Status_Code (E);
+         end;
+         Check (Got = Itb3.Status.Bad_Input, "interlock 96 status");
       end;
    end Persist;
 

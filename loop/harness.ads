@@ -79,6 +79,7 @@ package Harness is
       Chunk_Size       : Count := 0;
       Barrier_Fill     : Integer := 0;
       DRBG             : SU.Unbounded_String; --  empty = profile default
+      Interlock        : SU.Unbounded_String; --  empty = profile default
       GOMAXPROCS       : Integer := 0; --  0 = inherit from the environment
       Rekey_Every      : Count := 0;   --  0 = never
       Blob_Cycle_Every : Count := 0;   --  0 = never

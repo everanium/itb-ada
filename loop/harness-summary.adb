@@ -397,6 +397,8 @@ package body Harness.Summary is
          SU.Append (Text, ",""drbg"":" & JSON_String (SU.To_String (Cfg.DRBG)));
          SU.Append (Text, ",""drbg_auto_tier"":"
                     & JSON_String (Itb3.Runtime.DRBG_Auto_Tier));
+         SU.Append (Text, ",""interlock"":"
+                    & JSON_String (SU.To_String (Cfg.Interlock)));
          SU.Append (Text, ",""chunk_size_bytes"":" & Img (Cfg.Chunk_Size));
          SU.Append (Text, ",""barrier_fill"":" & Img (Cfg.Barrier_Fill));
          SU.Append (Text, ",""parallax"":""" & On_Off (Cfg.Parallax) & """");

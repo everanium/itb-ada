@@ -77,6 +77,15 @@ package body Itb3.Opts is
       Set (O, "mode", Int_Image (N));
    end Set_Mode;
 
+   -------------------
+   -- Set_Interlock --
+   -------------------
+
+   procedure Set_Interlock (O : in out Opts; Width : String) is
+   begin
+      Set (O, "interlock", Width);
+   end Set_Interlock;
+
    ---------------------
    -- Set_Perm_Master --
    ---------------------

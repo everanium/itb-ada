@@ -77,7 +77,7 @@ procedure Loop_Main is
    --  whose profiles need this fill.
    Keystream_Fill_Cipher : constant String := "aescmac";
 
-   N_Flags : constant := 25;
+   N_Flags : constant := 26;
 
    type Flag_Kind is (K_Int, K_Int64, K_UInt64, K_String, K_Bool);
 
@@ -100,6 +100,7 @@ procedure Loop_Main is
       new String'("gomaxprocs"),
       new String'("goroutines"),
       new String'("hash"),
+      new String'("interlock"),
       new String'("iterations"),
       new String'("json-output"),
       new String'("key-bits"),
@@ -127,6 +128,7 @@ procedure Loop_Main is
       new String'("int"),
       new String'("int"),
       new String'("string"),
+      new String'("string"),
       new String'("int"),
       new String'(""),
       new String'("int"),
@@ -145,7 +147,7 @@ procedure Loop_Main is
 
    Flag_Of : constant array (Flag_Index) of Flag_Kind :=
      [K_Int, K_Int64, K_Int, K_String, K_String, K_String, K_Int,
-      K_Int, K_Int, K_String, K_Int64, K_Bool,
+      K_Int, K_Int, K_String, K_String, K_Int64, K_Bool,
       K_Int, K_String, K_String, K_String, K_Int,
       K_String, K_String, K_String, K_String, K_Int64,
       K_UInt64, K_String, K_String];
@@ -161,6 +163,7 @@ procedure Loop_Main is
       new String'("0"),
       new String'("3"),
       new String'("areion512"),
+      new String'(""),
       new String'("0"),
       new String'("false"),
       new String'("0"),
@@ -196,6 +199,8 @@ procedure Loop_Main is
       new String'("concurrent workers (1..10); on runtimes without"
                   & " parallelism values above 1 are clamped to 1"),
       new String'("inner ITB hash primitive name"),
+      new String'("Interlocked Barrier chunk width: 48 | 168; empty ="
+                  & " profile default (48; 168 requires 512-bit hash)"),
       new String'("fixed per-worker iteration count; 0 = duration-based"),
       new String'("print the final summary as one compact JSON object"
                   & " instead of log lines"),
@@ -443,7 +448,7 @@ procedure Loop_Main is
          Err_Line ("--duration must be positive, got " & Text_Of (6));
          return Parse_Error;
       end if;
-      Cfg.Iterations := As_Count (Text_Of (11));
+      Cfg.Iterations := As_Count (Text_Of (12));
       if Cfg.Iterations < 0 then
          Err_Line ("--iterations must be >= 0, got " & Img (Cfg.Iterations));
          return Parse_Error;
@@ -463,9 +468,9 @@ procedure Loop_Main is
          Cfg.Workers_Asked := Asked;
          Cfg.Workers := Asked;
       end;
-      if not Harness.Worker.Parse_Shape (Text_Of (24), Cfg.Shape) then
+      if not Harness.Worker.Parse_Shape (Text_Of (25), Cfg.Shape) then
          Err_Line ("--shape must be stream | message | stream_one_shot "
-                   & "| both, got """ & Text_Of (24) & """");
+                   & "| both, got """ & Text_Of (25) & """");
          return Parse_Error;
       end if;
       if not Hash_Registered (Text_Of (10)) then
@@ -475,22 +480,22 @@ procedure Loop_Main is
       end if;
       Cfg.Hash := Raw (10);
       --  Validated by Init: the C ABI enumerates no MAC names.
-      Cfg.MAC := Raw (14);
-      if not Parse_Size (Text_Of (20), Cfg.Payload) then
-         Err_Line ("--payload-size: invalid size """ & Text_Of (20) & """");
+      Cfg.MAC := Raw (15);
+      if not Parse_Size (Text_Of (21), Cfg.Payload) then
+         Err_Line ("--payload-size: invalid size """ & Text_Of (21) & """");
          return Parse_Error;
       end if;
       if Cfg.Payload < 1 then
          Err_Line ("--payload-size must be at least 1 byte");
          return Parse_Error;
       end if;
-      if Text_Of (15) = "auto" then
+      if Text_Of (16) = "auto" then
          Cfg.Memlimit_Auto := True;
          Cfg.Memlimit :=
            (if Cfg.Workers <= 3 then 1024 * 1024 * 1024
             else 256 * 1024 * 1024);
-      elsif not Parse_Size (Text_Of (15), Cfg.Memlimit) then
-         Err_Line ("--memlimit: invalid size """ & Text_Of (15) & """");
+      elsif not Parse_Size (Text_Of (16), Cfg.Memlimit) then
+         Err_Line ("--memlimit: invalid size """ & Text_Of (16) & """");
          return Parse_Error;
       end if;
       Cfg.GoGC := As_Integer (Text_Of (7));
@@ -498,24 +503,24 @@ procedure Loop_Main is
          Err_Line ("--gogc must be >= 0, got " & Img (Cfg.GoGC));
          return Parse_Error;
       end if;
-      if not Parse_On_Off (Text_Of (18), Cfg.Parallax) then
-         Err_Line ("--parallax must be on | off, got """ & Text_Of (18)
+      if not Parse_On_Off (Text_Of (19), Cfg.Parallax) then
+         Err_Line ("--parallax must be on | off, got """ & Text_Of (19)
                    & """");
          return Parse_Error;
       end if;
-      if not Parse_On_Off (Text_Of (25), Cfg.Wrapper) then
-         Err_Line ("--wrapper must be on | off, got """ & Text_Of (25)
+      if not Parse_On_Off (Text_Of (26), Cfg.Wrapper) then
+         Err_Line ("--wrapper must be on | off, got """ & Text_Of (26)
                    & """");
          return Parse_Error;
       end if;
-      Cfg.Profile := Raw (21);
+      Cfg.Profile := Raw (22);
       if SU.Length (Cfg.Profile) > 0 then
          if not Profile_Surface (SU.To_String (Cfg.Profile), Surface) then
             return Parse_Error;
          end if;
          Cfg.Shape := Narrow_Shape (Cfg.Shape, Surface);
       end if;
-      Cfg.Key_Bits := As_Integer (Text_Of (13));
+      Cfg.Key_Bits := As_Integer (Text_Of (14));
       case Cfg.Key_Bits is
          when 0 | 512 | 1024 | 2048 =>
             null;
@@ -524,7 +529,7 @@ procedure Loop_Main is
                       & "(or 0 = profile default), got " & Img (Cfg.Key_Bits));
             return Parse_Error;
       end case;
-      Cfg.Nonce_Bits := As_Integer (Text_Of (17));
+      Cfg.Nonce_Bits := As_Integer (Text_Of (18));
       case Cfg.Nonce_Bits is
          when 0 | 128 | 256 | 512 =>
             null;
@@ -555,6 +560,15 @@ procedure Loop_Main is
       end case;
       --  Validated by Init: the C ABI enumerates no DRBG names.
       Cfg.DRBG := Raw (5);
+      Cfg.Interlock := Raw (11);
+      if Text_Of (11) /= ""
+        and then Text_Of (11) /= "48"
+        and then Text_Of (11) /= "168"
+      then
+         Err_Line ("--interlock must be 48 | 168 (or empty = profile default)"
+                   & ", got """ & Text_Of (11) & """");
+         return Parse_Error;
+      end if;
       if not Parse_Size (Text_Of (4), Cfg.Chunk_Size) then
          Err_Line ("--chunk-size: invalid size """ & Text_Of (4) & """");
          return Parse_Error;
@@ -565,7 +579,7 @@ procedure Loop_Main is
                    & Img (Cfg.GOMAXPROCS));
          return Parse_Error;
       end if;
-      Cfg.Rekey_Every := As_Count (Text_Of (22));
+      Cfg.Rekey_Every := As_Count (Text_Of (23));
       if Cfg.Rekey_Every < 0 then
          Err_Line ("--rekey-every must be >= 0, got "
                    & Img (Cfg.Rekey_Every));
@@ -578,18 +592,18 @@ procedure Loop_Main is
          return Parse_Error;
       end if;
       if not Harness.Payload.Parse_Payload_Mode
-               (Text_Of (19), Cfg.Payload_Mode)
+               (Text_Of (20), Cfg.Payload_Mode)
       then
          Err_Line ("--payload-mode must be fixed | rotating | "
                    & "pattern-zero | pattern-ff | pattern-ascii, got """
-                   & Text_Of (19) & """");
+                   & Text_Of (20) & """");
          return Parse_Error;
       end if;
-      if not Parse_U64 (Text_Of (23), Cfg.Seed) then
+      if not Parse_U64 (Text_Of (24), Cfg.Seed) then
          Cfg.Seed := 0;
       end if;
-      Cfg.JSON_Output := Text_Of (12) = "true";
-      Cfg.Memprofile := Raw (16);
+      Cfg.JSON_Output := Text_Of (13) = "true";
+      Cfg.Memprofile := Raw (17);
       return Parse_Ok;
    end Validate;
 
@@ -751,6 +765,7 @@ procedure Loop_Main is
          JSON : constant String := Itb3.Pipeline.Inspect (Blob);
          Line : SU.Unbounded_String;
          DRBG : constant String := Record_Str (JSON, "drbg");
+         Interlock : constant String := Record_Str (JSON, "interlock");
          Container_Mode : constant Count :=
            Record_Int (JSON, "container_mode");
       begin
@@ -769,6 +784,9 @@ procedure Loop_Main is
          end if;
          if DRBG /= "-" then
             SU.Append (Line, " drbg=" & DRBG);
+         end if;
+         if Interlock /= "-" then
+            SU.Append (Line, " interlock=" & Interlock);
          end if;
          Log_Line (SU.To_String (Line));
       end;
@@ -859,6 +877,7 @@ procedure Loop_Main is
       Itb3.Opts.Set (Options, "nonceBits", Img (Cfg.Nonce_Bits));
       Itb3.Opts.Set (Options, "barrierFill", Img (Cfg.Barrier_Fill));
       Itb3.Opts.Set (Options, "drbg", SU.To_String (Cfg.DRBG));
+      Itb3.Opts.Set (Options, "interlock", SU.To_String (Cfg.Interlock));
       Itb3.Opts.Set (Options, "chunkSize", Img (Cfg.Chunk_Size));
       if SU.Length (Cfg.Profile) > 0 then
          Filled := Fill_Keystream_Layers
@@ -968,7 +987,9 @@ begin
              & (if Cfg.Blob_Mode /= 1
                 then " blob-mode=" & Img (Cfg.Blob_Mode) else "")
              & (if SU.Length (Cfg.DRBG) > 0
-                then " drbg=" & SU.To_String (Cfg.DRBG) else ""));
+                then " drbg=" & SU.To_String (Cfg.DRBG) else "")
+             & (if SU.Length (Cfg.Interlock) > 0
+                then " interlock=" & SU.To_String (Cfg.Interlock) else ""));
    Log_Line ("policy: microbatch-tiers="
              & Policy_Label ("ITB_MICROBATCH_TIERS")
              & " hashpool-starters="

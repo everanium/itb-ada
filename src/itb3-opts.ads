@@ -24,6 +24,7 @@ package Itb3.Opts is
    --  Typed setters over the common keys. Each renders onto the same
    --  pass-through query string as Set.
    procedure Set_Mode (O : in out Opts; N : Integer);
+   procedure Set_Interlock (O : in out Opts; Width : String);
    procedure Set_Perm_Master (O : in out Opts; Master : Byte_Array);
    procedure Set_Wrap_Master (O : in out Opts; Master : Byte_Array);
    procedure Set_With_Parallax (O : in out Opts; On : Boolean);
