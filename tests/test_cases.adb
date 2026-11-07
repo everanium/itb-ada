@@ -968,6 +968,21 @@ package body Test_Cases is
                       "inspect must carry container_mode=2 under mode 2");
             end;
          end;
+
+         declare
+            M3_Opts : Itb3.Opts.Opts;
+            M3_Pipe : Itb3.Pipeline.Pipeline;
+         begin
+            M3_Opts.Set_Mode (3);
+            M3_Pipe.Init ("singlemsg-triple-mac-v1", M3_Opts);
+            declare
+               M3_Blob : constant Itb3.Byte_Array := M3_Pipe.Save;
+               M3_Insp : constant String := Itb3.Pipeline.Inspect (M3_Blob);
+            begin
+               Check (Ada.Strings.Fixed.Index (M3_Insp, """container_mode"":3") > 0,
+                      "inspect must carry container_mode=3 under mode 3");
+            end;
+         end;
       end;
 
       --  Inspect of garbage is Bad_Input.

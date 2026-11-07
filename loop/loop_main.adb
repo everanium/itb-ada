@@ -186,7 +186,7 @@ procedure Loop_Main is
       new String'("reopen each pipeline from its session blob every N"
                   & " iterations per worker; 0 = never"),
       new String'("container floor sizing mode: 1 (per-region, default)"
-                  & " | 2 (per-container)"),
+                  & " | 2 (per-container) | 3 (gauss-posit)"),
       new String'("streaming chunk-size budget (e.g. 4MB); 0 = profile"
                   & " default; inert for pure message shape"),
       new String'("DRBG fill primitive name (see itb3 drbgs); empty ="
@@ -541,11 +541,12 @@ procedure Loop_Main is
       end case;
       Cfg.Blob_Mode := As_Integer (Text_Of (3));
       case Cfg.Blob_Mode is
-         when 1 | 2 =>
+         when 1 | 2 | 3 =>
             null;
          when others =>
             Err_Line ("--blob-mode must be 1 (per-region) | 2 "
-                      & "(per-container), got " & Img (Cfg.Blob_Mode));
+                      & "(per-container) | 3 (gauss-posit), got "
+                      & Img (Cfg.Blob_Mode));
             return Parse_Error;
       end case;
       Cfg.Barrier_Fill := As_Integer (Text_Of (1));
@@ -779,7 +780,7 @@ procedure Loop_Main is
                    & " mac=" & Record_Str (JSON, "mac")
                    & " parallax=" & On_Off (Record_Bool (JSON, "parallax"))
                    & " wrapper=" & On_Off (Record_Bool (JSON, "wrapper")));
-         if Container_Mode = 2 then
+         if Container_Mode = 2 or else Container_Mode = 3 then
             SU.Append (Line, " container-mode=" & Img (Container_Mode));
          end if;
          if DRBG /= "-" then

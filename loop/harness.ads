@@ -75,7 +75,7 @@ package Harness is
       Profile          : SU.Unbounded_String;
       Key_Bits         : Integer := 0; --  0 = profile default
       Nonce_Bits       : Integer := 0;
-      Blob_Mode        : Integer := 1; --  1 = per-region, 2 = per-container
+      Blob_Mode        : Integer := 1; --  1 = per-region, 2 = per-container, 3 = gauss-posit
       Chunk_Size       : Count := 0;
       Barrier_Fill     : Integer := 0;
       DRBG             : SU.Unbounded_String; --  empty = profile default
